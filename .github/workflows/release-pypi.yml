@@ -65,6 +65,9 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      # The first release of a new project uses the PYPI_API_TOKEN secret; once the trusted
+      # publisher is set on PyPI the secret is removed and the token-less (OIDC) path is used.
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist
+          password: ${{ secrets.PYPI_API_TOKEN }}
