@@ -1,40 +1,54 @@
 # Changelog
 
-This file covers the format and the implementations in this repository. Format versions are
-specified in [spec/PROBE.md](spec/PROBE.md). The crates and the Python package follow semantic
-versioning.
+All notable changes to the implementations in this repository (the `probe-format` crate, the
+`probe-cli` crate and the `probe-format` Python package) are recorded here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the packages follow
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html). The format's own versions are
+specified in [spec/PROBE.md](spec/PROBE.md) and summarised under [Format versions](#format-versions).
 
-## Format
+## [Unreleased]
 
-### v3 - in design
-- One container with a registered codec id per stream, and profiles FAST, BALANCED and ARCHIVE,
-  transcoded losslessly from v1 and v2.
-- Target: smaller than fixed records with zstd 19, and faster to decode than fixed records with
-  zstd 3, on the same hour.
+## [0.1.0] - 2026-11-13
 
-### v2 (`evmin/5`) - current
-- The block index has 8 uvarints per entry: offset and length plus the block's event, level,
-  trade, payload, hash and best-exception counts.
-- Side streams are in block order, and best-price exceptions are block-relative, so one market's
-  trade hashes and payloads need only its own blocks.
+First release of the reference implementations. `probe-format` and `probe-cli` are on crates.io;
+the `probe-format` Python package follows on PyPI.
 
-### v1 (`evmin/4`) - frozen 2026-11-12
-- The first full-book hour format.
-- An optional `.evidx` sidecar gives v1 files the v2 per-block positions.
+### Added
 
-## Implementations
-
-### 0.1.0 - unreleased
 - `probe-format` crate: header, versions, markets, segments and block indexes; every event and
   level in the reference order (serial or parallel); one market through the block index; a
   receive-time range; the book of a token at a time; every side stream (trade transaction
   hashes, payloads, best-price exceptions, venue book hashes); the core and full conformance
   dumps; `book-max` rows; Arrow record batches, Arrow IPC and parquet output (features `arrow`,
   `parquet`).
-- `probe` CLI: `info`, `cat`, `convert`, `verify`, `dump`, `book`.
+- `probe` CLI (crate `probe-cli`): `info`, `cat`, `convert`, `verify`, `dump`, `book`.
 - `probe-format` Python package: events, levels, markets and `book-max` as pyarrow tables;
-  pandas and polars through Arrow; books at a time.
+  pandas and polars through Arrow; books at a time. One abi3 wheel per platform, Python 3.9+.
 - Conformance: every vector's full dump equals its `events.csv`, every core dump and every
   market's `book-max` equals the Go reader's, every book query equals `books.csv`.
 - The range decoder renormalises in a loop, as the encoder does (vector `vec_renorm_shift0`).
 - Files with flag bits other than 16 and 64 are refused rather than decoded.
+
+## Format versions
+
+### v3 - in design
+
+- One container with a registered codec id per stream, and profiles FAST, BALANCED and ARCHIVE,
+  transcoded losslessly from v1 and v2.
+- Target: smaller than fixed records with zstd 19, and faster to decode than fixed records with
+  zstd 3, on the same hour.
+
+### v2 (`evmin/5`) - current
+
+- The block index has 8 uvarints per entry: offset and length plus the block's event, level,
+  trade, payload, hash and best-exception counts.
+- Side streams are in block order, and best-price exceptions are block-relative, so one market's
+  trade hashes and payloads need only its own blocks.
+
+### v1 (`evmin/4`) - frozen 2026-11-12
+
+- The first full-book hour format.
+- An optional `.evidx` sidecar gives v1 files the v2 per-block positions.
+
+[Unreleased]: https://github.com/probnode/probe/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/probnode/probe/releases/tag/v0.1.0

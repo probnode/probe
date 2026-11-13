@@ -1,0 +1,39 @@
+name: Feature request
+description: Suggest a change to probe.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This tracker is for the code in this repository. For questions about the data or your
+        plan, see https://probnode.com/help or write to hello@probnode.com.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Specification (spec/PROBE.md)
+        - probe-format (Rust crate)
+        - probe (CLI)
+        - probe-format (Python package)
+        - Conformance vectors
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do, and what is in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like
+      description: The call, command or change you have in mind, with an example if you can.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered

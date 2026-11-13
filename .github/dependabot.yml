@@ -1,0 +1,32 @@
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 5
+    groups:
+      cargo:
+        patterns: ["*"]
+    commit-message:
+      prefix: "deps"
+  - package-ecosystem: "pip"
+    directory: "/probe-py"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 5
+    groups:
+      pip:
+        patterns: ["*"]
+    commit-message:
+      prefix: "deps"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "deps"

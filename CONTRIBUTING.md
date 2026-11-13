@@ -38,7 +38,7 @@ CI runs the same on Linux, macOS and Windows.
 - Keep public items documented (`#![warn(missing_docs)]`).
 - Performance changes: state the machine, the file and the before / after numbers. The core dump
   digest must not change.
-- Add a line to `CHANGELOG.md` under the unreleased version.
+- Add a line to `CHANGELOG.md` under `[Unreleased]`.
 
 ## Writing another reader
 
