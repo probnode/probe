@@ -1,0 +1,5 @@
+* text=auto eol=lf
+# Conformance vectors and expected outputs are compared byte for byte: never convert line ends.
+*.probe binary
+*.evidx binary
+tests/** -text

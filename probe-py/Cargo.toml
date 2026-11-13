@@ -1,0 +1,18 @@
+[package]
+name = "probe-py"
+description = "Python bindings of the Probe reader (Python package probe-format)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "_probe"
+crate-type = ["cdylib"]
+
+[dependencies]
+probe-format = { workspace = true, features = ["arrow"] }
+pyo3.workspace = true

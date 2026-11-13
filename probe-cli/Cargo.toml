@@ -1,0 +1,22 @@
+[package]
+name = "probe-cli"
+description = "The probe command: inspect, print, convert (parquet, Arrow) and verify Probe order-book files"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["market-data", "order-book", "polymarket", "parquet", "cli"]
+categories = ["command-line-utilities", "encoding", "finance"]
+include = ["src/**/*.rs", "Cargo.toml", "README.md", "LICENSE"]
+
+[[bin]]
+name = "probe"
+path = "src/main.rs"
+
+[dependencies]
+probe-format = { workspace = true, features = ["parquet"] }
+clap.workspace = true
+serde_json.workspace = true

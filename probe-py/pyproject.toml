@@ -1,0 +1,38 @@
+[build-system]
+requires = ["maturin>=1.5,<2"]
+build-backend = "maturin"
+
+[project]
+name = "probe-format"
+description = "Read Probe prediction-market order-book files into Arrow, pandas and polars"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+authors = [{ name = "ProbNode", email = "hello@probnode.com" }]
+requires-python = ">=3.9"
+dependencies = ["pyarrow>=14"]
+dynamic = ["version"]
+keywords = ["market-data", "order-book", "polymarket", "arrow", "parquet"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Topic :: Office/Business :: Financial",
+]
+
+[project.optional-dependencies]
+pandas = ["pandas>=1.5"]
+polars = ["polars>=0.20"]
+test = ["pytest>=7"]
+
+[project.urls]
+Homepage = "https://github.com/probnode/probe"
+Specification = "https://github.com/probnode/probe/blob/main/spec/PROBE.md"
+Changelog = "https://github.com/probnode/probe/blob/main/CHANGELOG.md"
+
+[tool.maturin]
+module-name = "probe_format._probe"
+python-source = "python"
+features = ["pyo3/extension-module"]

@@ -1,0 +1,40 @@
+[package]
+name = "probe-format"
+description = "Reader for Probe, a lossless compressed file format for prediction-market order books"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+documentation = "https://docs.rs/probe-format"
+readme = "README.md"
+keywords = ["market-data", "order-book", "polymarket", "compression", "finance"]
+categories = ["encoding", "compression", "finance", "parser-implementations"]
+include = ["src/**/*.rs", "Cargo.toml", "README.md", "LICENSE"]
+
+[lib]
+name = "probe_format"
+
+[features]
+default = ["parallel"]
+# Decode a segment's blocks on all cores (rayon).
+parallel = ["dep:rayon"]
+# Arrow record batches and Arrow IPC output.
+arrow = ["dep:arrow-array", "dep:arrow-schema", "dep:arrow-ipc"]
+# Parquet output of book-max rows.
+parquet = ["arrow", "dep:parquet"]
+
+[dependencies]
+memmap2.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+zstd.workspace = true
+rayon = { workspace = true, optional = true }
+arrow-array = { workspace = true, optional = true }
+arrow-schema = { workspace = true, optional = true }
+arrow-ipc = { workspace = true, optional = true }
+parquet = { workspace = true, optional = true }
+
+[package.metadata.docs.rs]
+all-features = true

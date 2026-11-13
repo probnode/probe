@@ -1,0 +1,32 @@
+[workspace]
+resolver = "2"
+members = ["probe", "probe-cli", "probe-py"]
+# probe-py builds a Python extension module: maturin builds and tests it (see probe-py/README.md).
+default-members = ["probe", "probe-cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "Apache-2.0"
+authors = ["ProbNode <hello@probnode.com>"]
+repository = "https://github.com/probnode/probe"
+
+[workspace.dependencies]
+probe-format = { path = "probe", version = "0.1.0" }
+memmap2 = "0.9"
+rayon = "1.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+zstd = "0.13"
+arrow-array = "55"
+arrow-schema = "55"
+arrow-ipc = "55"
+parquet = { version = "55", default-features = false, features = ["arrow", "zstd"] }
+clap = { version = "4.5", features = ["derive"] }
+pyo3 = { version = "0.23", features = ["abi3-py39"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
