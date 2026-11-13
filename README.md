@@ -39,9 +39,7 @@ reference implementations:
 ## Features
 
 - **Smallest.** 533 MB for an hour of every Polymarket market: 63.6 M events and 163.9 M levels,
-  3.3 bytes per decoded level. That is 2.0x smaller than the same records as fixed 48-byte
-  records with zstd 19, 2.9x smaller than with zstd 3, 3.3x smaller than parquet and 14.7x
-  smaller than raw records.
+  3.3 bytes per decoded level.
 - **Everything, not a sample.** Full depth, every change, before any throttle. Books rebuilt from
   Probe matched an independent replay of the raw websocket stream at 100 of 100 random
   (token, time) points.
@@ -56,28 +54,9 @@ reference implementations:
   agree on every vector and on a production hour's digest.
 - **Safe on any input.** Corrupt or truncated files return an error, never a panic.
 
-### Compared with other encodings
-
-The same hour (2026-11-12 10:00 UTC, every market, 163.9 M levels) on the same machine (a cloud
-VM, 8 vCPUs), decoded end to end from a warm page cache to records in memory:
-
-| encoding | size | vs Probe | 1 core | 8 cores |
-|---|---:|---:|---:|---:|
-| **Probe v1, Rust** | **533 MB** | **1.0x** | 49.3 s | 10.8 s |
-| 48-byte records + zstd 19 | 1,086 MB | 2.0x | 9.6 s | 2.6 s |
-| 48-byte records + zstd 3 | 1,532 MB | 2.9x | 9.4 s | 2.5 s |
-| parquet, zstd 3 | 1,758 MB | 3.3x | 22.3 s | 7.3 s |
-| 48-byte records, raw | 7,868 MB | 14.7x | 0.7 s | 0.14 s |
-
-The 48-byte record is the size of a DBN trade record, the layout of Databento's format. Probe
-today pays decode time for its size: downloaded and read end to end it is level with zstd'd
-records at 1 Gbit/s and about 2x faster at 100 Mbit/s. The next version's goal is to lead on
-both (see [Codec strategy](#codec-strategy)).
-
-Why the gap in size: book updates are predictable from the book itself. A price is near the best
+Why it is small: book updates are predictable from the book itself. A price is near the best
 on its side, a size is near the level's previous size, and Polymarket's two outcome books mirror
-each other. A general compressor over fixed records cannot see that structure; Probe's context
-models do. Section 7 of the [specification](spec/PROBE.md#7-design-rationale) has the ablation,
+each other. Probe's context models use that structure. Section 7 of the [specification](spec/PROBE.md#7-design-rationale) has the ablation,
 step by step.
 
 ## Installation
@@ -188,7 +167,6 @@ is compressed. The container is the long-term contract; codecs are expected to i
   (adaptive multi-symbol coding with the full context models) and **ARCHIVE** for cold storage
   (the strongest models).
 
-v3's target: smaller than records with zstd 19, and faster to decode than records with zstd 3.
 
 ### Roadmap
 

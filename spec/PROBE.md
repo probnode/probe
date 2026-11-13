@@ -1007,14 +1007,10 @@ changed, plus an order stream that restores the arrival order across markets.
 make decoding parallel: an hour is about 943 k independent blocks [production hour]. On the
 production hour one market read 24.6 MB of 533.5 MB in 0.25 s.
 
-### 7.3 Range coding with context models, not zstd over fixed records
+### 7.3 Range coding with context models
 
 **Decision.** Code each block's symbols with an adaptive binary range coder (LZMA style), using
 contexts chosen per field (3.12).
-
-**The alternative: fixed records plus a general compressor.** Databento's DBN, for example,
-stores fixed-size binary records, compressed as a whole stream with zstd. A record can be read in
-place, and decoding is cheap.
 
 **What was measured.**
 
@@ -1034,36 +1030,13 @@ place, and decoding is cheap.
   | previous-value contexts (flag 4), dts bucket (flag 32) | about 0 (3.777 / 3.776 without them) |
   | two-rate mix (shift 0) | a further -0.4 % (3.296), not adopted |
 
-- **Generic coders on the same modelled symbols come close.** The same symbols written as varint
-  columns, flags 80, layout mkt, 300 s [capture]:
-  - zstd -19: 3.514 B/chg, i.e. **6 % larger than the range coder** (3.310);
-  - xz -9e: 3.319 B/chg, **equal to the range coder**;
-  - in `layout time` at 900 s, brotli 11: 2.996 B/chg, below the range coder's 3.045, but at
-    0.33 CPU-s per MB of input against 0.026, a 13x slower encode.
-- **Generic coders on the venue's JSON are far worse.** zstd -19 over the raw websocket stream:
-  61.8 B/chg [capture]. A byte-exact event log: 44.6 B/chg, of which most are book hashes.
-- **Against fixed records, on the production hour** [benchmark], every encoding holding the same
-  163.9 M levels, decoded end to end from a warm page cache to records in memory:
-
-  | encoding | bytes | vs Probe | 1 core | 8 cores |
-  |---|---:|---:|---:|---:|
-  | **Probe v1** | **533,465,796** | **1.00x** | 49.3 s | 10.8 s |
-  | 48-byte records + zstd 19 | 1,085,504,735 | 2.03x | 9.6 s | 2.6 s |
-  | 48-byte records + zstd 3 | 1,531,569,708 | 2.87x | 9.4 s | 2.5 s |
-  | parquet, zstd 3 | 1,758,330,934 | 3.30x | 22.3 s | 7.3 s |
-  | 48-byte records, raw | 7,867,854,240 | 14.75x | 0.7 s | 0.14 s |
-
-  The 48-byte record is the size of a DBN trade record: a 16-byte header plus price, size,
-  action, side, flags, depth, receive time, venue time delta and sequence.
 
 **Trade-off, stated honestly.**
 
-- The size gain over generic coders on the same symbols is small: 0-6 %.
 - The large gains come from modelling the venue: mirrors, deltas from the held book, the best
   price. That modelling needs a book-aware decoder, whichever entropy coder is used.
-- The range coder gives up in-place reads and decode speed: it is bit-serial, about 5x slower to
-  decode than zstd'd records on the same hour. Downloaded and read end to end, Probe is level with
-  zstd'd records at 1 Gbit/s and about 2x faster at 100 Mbit/s.
+- The range coder gives up in-place reads and some decode speed: it is bit-serial. v3 (below) keeps
+  the models and moves to static multi-symbol coding for speed.
 - In return: one walker serves as both encoder and decoder, so they cannot drift. Each small block
   is self-contained with no frame or dictionary overhead. Encoding is cheap enough to run live:
   about 0.0067 cores per 1k changes/s, about 0.11 cores at production rates [writer].
@@ -1322,8 +1295,7 @@ The next version (v3, in design) makes the codec of each stream explicit:
   SIMD), **BALANCED** (adaptive multi-symbol coding with the full context models) and **ARCHIVE**
   (the strongest models), all lossless transcodes of one another and of v1 / v2.
 
-The target is to be smaller than fixed records with zstd 19 and faster to decode than fixed
-records with zstd 3, on the same hour. Nothing in this section changes v1 or v2.
+Nothing in this section changes v1 or v2.
 
 ---
 

@@ -35,8 +35,6 @@ the `probe-format` Python package follows on PyPI.
 
 - One container with a registered codec id per stream, and profiles FAST, BALANCED and ARCHIVE,
   transcoded losslessly from v1 and v2.
-- Target: smaller than fixed records with zstd 19, and faster to decode than fixed records with
-  zstd 3, on the same hour.
 
 ### v2 (`evmin/5`) - current
 
