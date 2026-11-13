@@ -5,7 +5,8 @@ The `probe` command for [Probe](https://github.com/probnode/probe) order-book fi
 ```sh
 cargo install probe-cli
 
-probe info hour.probe --markets              # header, versions, markets, segments
+probe transcode hour.probe hour.v3.probe     # Probe v3, profile fast; --profile fast1 | rc1, --verify
+probe info hour.probe --markets              # header, versions, markets, segments, part codecs
 probe cat hour.probe --market will-x-happen --what levels --format ndjson --limit 20
 probe cat hour.probe --from 2026-11-12T10:05:00Z --to 2026-11-12T10:06:00Z
 probe convert hour.probe -o book.parquet     # the per-level book-max table (or .arrow)

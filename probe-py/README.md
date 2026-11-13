@@ -23,7 +23,10 @@ events = f.events(start_ns=f.header["hour_start_ns"],
                   end_ns=f.header["hour_start_ns"] + 600_000_000_000)
 levels = f.levels(market="will-x-happen")      # best-price exceptions and book hashes included
 f.book_at("7001", 1794477900000000000)          # {"bids": [(price_micro, size_micro), ...], ...}
+f.transcode("hour.v3.probe")                   # Probe v3 (profile "fast"), losslessly
 ```
+
+It reads Probe v1, v2 and v3.
 
 | method | rows |
 |---|---|

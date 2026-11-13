@@ -30,16 +30,18 @@ reference implementations:
 
 | piece | what it gives you |
 |---|---|
-| [`probe-format`](probe) Rust crate | open a file (mmap), header, versions, markets, segments, block index; every event and level in arrival order; one market through the block index; a time range; the book of a token at a time; every side stream (trade tx hashes, payloads, best-price exceptions, venue book hashes); Arrow and parquet output |
-| [`probe`](probe-cli) CLI (crate `probe-cli`) | `info`, `cat` (CSV / NDJSON), `convert` (parquet / Arrow IPC), `verify`, `dump`, `book` |
-| [`probe-format`](probe-py) Python package | Probe to pyarrow, pandas and polars, decoded in Rust |
+| [`probe-format`](probe) Rust crate | open a file of any version, v1, v2 or v3 (mmap): header, markets, segments, block index; every event and level in arrival order; one market through the block index; a time range; the book of a token at a time; every side stream (trade tx hashes, payloads, best-price exceptions, venue book hashes); Arrow and parquet output; a lossless transcoder to Probe v3 |
+| [`probe`](probe-cli) CLI (crate `probe-cli`) | `info`, `cat` (CSV / NDJSON), `convert` (parquet / Arrow IPC), `verify`, `dump`, `book`, `transcode` |
+| [`probe-format`](probe-py) Python package | Probe v1, v2 and v3 to pyarrow, pandas and polars, decoded in Rust; transcoding to v3 |
 | [spec/PROBE.md](spec/PROBE.md) | the normative specification, with the design rationale and measurements |
 | [tests/golden](tests/golden) | conformance vectors and the outputs every reader must reproduce byte for byte |
 
 ## Features
 
-- **Smallest.** 533 MB for an hour of every Polymarket market: 63.6 M events and 163.9 M levels,
-  3.3 bytes per decoded level.
+- **Small.** 405 MB for an hour of every Polymarket market as Probe v3 (63.6 M events and 163.9 M
+  levels, 2.5 bytes per decoded level), 24 % below the same hour as Probe v1.
+- **Fast.** Probe v3 decodes that hour, every event and level in arrival order, in 3.36 s on 8
+  cores and 13.84 s on one: 3.7 times faster than v1.
 - **Everything, not a sample.** Full depth, every change, before any throttle. Books rebuilt from
   Probe matched an independent replay of the raw websocket stream at 100 of 100 random
   (token, time) points.
@@ -47,17 +49,22 @@ reference implementations:
 - **One market without the rest.** A per-market block index: one market's hour is read and
   decoded in milliseconds once the file is open, by HTTP range requests if the file is remote.
 - **Parallel by construction.** An hour is about 943 k independent blocks, one per market per
-  five-minute segment. The Rust reader decodes the whole hour in 10.8 s on 8 cores.
+  five-minute segment, and v3 decodes its event columns in independent lanes.
 - **Any five-minute boundary is a valid start.** Every block opens with full-book checkpoints.
 - **Verifiable.** Conformance vectors and a byte-for-byte core dump keep every reader equal.
   Three independent implementations (the writer's own decoder, a Go reader and this Rust reader)
-  agree on every vector and on a production hour's digest.
+  agree on every vector and on a production hour's digest, and every v3 file decodes to its
+  source's dump byte for byte.
+- **Built to last.** In v3 every part of a file names its codec, and a codec id, once registered,
+  means the same bytes forever. Better coders arrive as new ids; old files keep opening.
 - **Safe on any input.** Corrupt or truncated files return an error, never a panic.
 
 Why it is small: book updates are predictable from the book itself. A price is near the best
 on its side, a size is near the level's previous size, and Polymarket's two outcome books mirror
 each other. Probe's context models use that structure. Section 7 of the [specification](spec/PROBE.md#7-design-rationale) has the ablation,
-step by step.
+step by step. Probe v3 keeps those models, codes them with static per-segment rANS tables, and
+stores the arrival order as the clock order plus the 1 % of events that arrived late
+([section 9](spec/PROBE.md#9-probe-v3-evmin6)).
 
 ## Installation
 
@@ -100,6 +107,10 @@ fn main() -> probe_format::Result<()> {
     if let Some(book) = f.book_at("7001", f.header().hour_start_ns + 1_800_000_000_000)? {
         println!("best bid {:?}, best ask {:?}", book.bids.last(), book.asks.first());
     }
+
+    // Probe v3, losslessly: the same events, levels and side streams, in fewer bytes.
+    let v3 = probe_format::v3::transcode(&f, probe_format::v3::Profile::Fast)?;
+    std::fs::write("hour.v3.probe", &v3.bytes)?;
     Ok(())
 }
 ```
@@ -107,6 +118,9 @@ fn main() -> probe_format::Result<()> {
 ### CLI
 
 ```sh
+probe transcode hour.probe hour.v3.probe           # Probe v3, profile fast (the default)
+probe transcode hour.probe hour.v3.probe --profile fast1 --verify
+probe info hour.v3.probe                           # every part with its codec
 probe info hour.probe --markets
 probe cat hour.probe --market will-x-happen --what levels --format ndjson --limit 20
 probe cat hour.probe --from 2026-11-12T10:05:00Z --to 2026-11-12T10:06:00Z
@@ -125,6 +139,7 @@ f = pf.open("hour.probe")
 book = f.book_max(market="will-x-happen")     # pyarrow.Table
 df = book.to_pandas()
 events = f.events(start_ns=f.header["hour_start_ns"])   # tx hashes, payloads, book hashes
+f.transcode("hour.v3.probe")                  # Probe v3, profile fast
 ```
 
 ProbNode's `book_full` dataset serves Probe hours; the [Rust client](https://github.com/probnode/probnode-rs)
@@ -150,6 +165,38 @@ opens them directly with its `probe` feature.
       hash           optional venue book hashes, 20 bytes each
     markets_zst      the markets table (zstd JSON): slugs, tokens, units
 
+Probe v3 keeps that container and names a codec on every part (`[name, offset, length, codec]`):
+
+    segments x 12
+      tables         codec 19   the segment's rANS frequency tables
+      evcols         codec 21   event type, outcome and both clocks of every event, in lanes
+      blocks         codec 20   one per market: the book-dependent part of its events (static rANS)
+      bidx3          codec 18   block index: row, length and counts per block
+      order          codec 17   the events that arrived out of receive-clock order (deferrals)
+      tx, payload.zst, hash      codec 0    the source's side streams, byte for byte
+    mkunits, mkslugs codecs 22, 23   units and slugs of the markets table, without its JSON
+    markets_zst      the source's markets table, byte for byte
+
+### Probe v3 profiles, measured
+
+One production hour (63.6 M events, 163.9 M levels) in every profile and in v1, on one GCP
+e2-standard-8 VM (AMD EPYC 7B12, 8 vCPU), with the reference implementation of the v3 codecs.
+Decode = from the file to every event and level in memory, in arrival order; one market = open the
+file and decode one market. Every encoding has the same core-dump digest.
+
+| encoding | size | decode, 1 core | decode, 8 cores | one market |
+|---|---:|---:|---:|---:|
+| **v3 fast** | **405,429,923 B** | **13.84 s** | **3.36 s** | **0.19 s** |
+| v3 fast1 | 406,362,525 B | 17.53 s | 6.07 s | 0.22 s |
+| v3 rc1 | 451,485,094 B | 40.72 s | 10.00 s | 0.20 s |
+| v1 | 533,465,796 B | 51.06 s | 12.47 s | 0.37 s |
+
+Transcoding that hour from v1 to v3 fast took 43.7 s on 8 threads and 111.8 s on 1, at 1.3 GB peak
+memory. The profiles: **fast** (model M2: event columns + static rANS blocks, the default),
+**fast1** (model M1: one static-rANS stream per block), **rc1** (v1's blocks kept as they are,
+with v3's order and index). On tiny files, such as the conformance vectors, the per-segment
+tables cost more than they save; v3 is built for real hours.
+
 ### Codec strategy
 
 Probe separates **the container**, what a file is, from **the codecs**, how each stream inside it
@@ -157,15 +204,17 @@ is compressed. The container is the long-term contract; codecs are expected to i
 
 - **The container is stable.** Hour files, segments, per-market blocks, the block and time
   indexes, the markets table, both clocks and the checkpoints keep their meaning across versions.
-- **Each stream names its codec** (from v3). A better coder is a new codec id, not a new format.
+- **Each part names its codec** (v3). A better coder is a new codec id, not a new format. The
+  registry today: 0 raw, 2 rc1 (v1's range coder), 16 model M1, 17 the clock-merge order, 18
+  integer columns, 19 rANS tables, 20 model M2, 21 event columns, 22 / 23 markets units and slugs.
 - **Codecs are added, never redefined.** An id once registered means the same bytes forever, so a
   file written today still opens in ten years.
+- **Readers refuse what they do not implement.** An unknown codec id is refused, never guessed.
 - **Every codec ships conformance vectors** before it is registered; every reader must decode
-  them to the identical core dump.
-- **Profiles pick codecs by purpose**, all lossless transcodes of each other:
-  **FAST** for analysis (static multi-symbol tANS / rANS, interleaved, SIMD), **BALANCED**
-  (adaptive multi-symbol coding with the full context models) and **ARCHIVE** for cold storage
-  (the strongest models).
+  them to the identical core dump. `tests/golden/v3` holds every vector in every profile.
+- **Profiles pick codecs by purpose**, all lossless transcodes of each other and of v1 / v2:
+  **fast** and **fast1** today; an adaptive profile and an archive profile (checkpoints predicted
+  from the previous segment) are measured candidates for later codec ids.
 
 
 ### Roadmap
@@ -177,7 +226,7 @@ is compressed. The container is the long-term contract; codecs are expected to i
 - [ ] `.evidx` sidecar reader (one-market side streams for v1 files)
 - [ ] Ranged reads over HTTP / object storage from the Rust crate (the format supports it today)
 - [ ] C ABI and headers, for C, C++ and other languages
-- [ ] v3: registered codecs, the FAST profile, a writer and `probe transcode`
+- [x] v3: registered codecs, the fast profiles, a lossless transcoder and `probe transcode`
 - [ ] Wider SIMD (AVX-512, NEON / SVE) and GPU decode for bulk replays
 
 ## Versioning and compatibility
@@ -187,8 +236,8 @@ The format and the implementations are versioned separately.
 | Probe | header `version` | status |
 |---|---|---|
 | v1 | `evmin/4` | frozen |
-| v2 | `evmin/5` | current: counts in the block index, side streams in block order, so one market's trades carry their transaction hashes without decoding the rest |
-| v3 | - | in design: one container, a registered codec per stream, profiles |
+| v2 | `evmin/5` | frozen; what writers record: counts in the block index, side streams in block order, so one market's trades carry their transaction hashes without decoding the rest |
+| v3 | `evmin/6` | current: one container, a registered codec per part, profiles fast, fast1 and rc1; made from v1 / v2 by a lossless transcode |
 
 - A reader must accept every earlier version, and a new version never changes what an earlier
   file means. Upgrading is a lossless transcode, checked by the core dump. `evmin` is the

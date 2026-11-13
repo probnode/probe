@@ -1,16 +1,19 @@
-# Probe file format specification, v1 and v2
+# Probe file format specification, v1, v2 and v3
 
-Status: **stable.** Probe v1 and Probe v2 are frozen: the meaning of every byte is fixed. This
-document is normative. A reader written from it alone decodes every Probe v1 and v2 file, and
-proves it on the conformance vectors of section 8.
+Status: **stable.** Probe v1 and Probe v2 are frozen: the meaning of every byte is fixed. Probe v3
+is a container with a registry of codecs: its container and every registered codec are frozen,
+and new codecs are only ever added (9.2). This document is normative. A reader written from it
+alone decodes every Probe v1, v2 and v3 file, and proves it on the conformance vectors of
+sections 8 and 9.12.
 
 | Probe | header `"version"` | magic | status |
 |---|---|---|---|
 | **v1** | `"evmin/4"` | `EVM4` | frozen 2026-11-12 |
-| **v2** | `"evmin/5"` | `EVM4` | current |
+| **v2** | `"evmin/5"` | `EVM4` | frozen; what writers record |
+| **v3** | `"evmin/6"` | `EVM4` | current 2026-11-13: transcoded losslessly from v1 / v2 (section 9) |
 
 The version strings keep the format's working name, *evmin* (event log, minimal). The magic is
-`EVM4` for both versions; only the header's `version` tells them apart. Files are named
+`EVM4` for every version; only the header's `version` tells them apart. Files are named
 `*.probe` by convention; the extension carries no meaning.
 
 **Conventions.** MUST, MUST NOT, SHOULD and MAY are used as in RFC 2119. Integers in the container
@@ -114,6 +117,11 @@ exactly the same events as the v1 file of the same input; the vectors `basic_v1.
 `basic_v2.probe` are such a pair. On the all-markets sample the v2 file is 13.71 MB against
 17.65 MB as v1, because the block-ordered exception rows compress better.
 
+**Probe v3 (`evmin/6`).** v3 keeps the container's meaning and every event, and gives every part a
+registered codec id: a new block index, an order part that stores only the events that arrived
+out of clock order, and static-rANS blocks. A v3 file is a lossless transcode of a v1 or v2 file
+and decodes to exactly its events and side streams. Section 9 lists every change and defines it.
+
 **Earlier files.** A prototype wrote files with the same magic and a numeric `"version": 1`. They
 are not Probe files.
 
@@ -121,10 +129,11 @@ are not Probe files.
 
 1. **A frozen version never changes.** The meaning of every byte of v1 and v2 is fixed.
 2. **Readers MUST reject an unknown version.** A reader MUST check the magic (`EVM4`) and MUST
-   refuse any `version` other than the strings it implements (`"evmin/4"`, `"evmin/5"`). It MUST
-   NOT guess. The prototype's numeric `1` is refused too.
-3. **Readers MUST refuse other coding families.** A file whose `family` is not `"rc"`, or whose
-   `layout` is not `"mkt"`, MUST be refused.
+   refuse any `version` other than the strings it implements (`"evmin/4"`, `"evmin/5"`,
+   `"evmin/6"`). It MUST NOT guess. The prototype's numeric `1` is refused too.
+3. **Readers MUST refuse other coding families.** A file whose `family` is not `"rc"` (v1, v2) or
+   `"probe3"` (v3), or whose `layout` is not `"mkt"`, MUST be refused. In v3 a reader MUST also
+   refuse a codec id it does not implement (9.2).
 4. **Additive fields within a version.** A writer MAY add a JSON key to the header, a segment
    object or a market row, but only if a reader that ignores the key still decodes every event,
    level, clock and side-stream item exactly as before. Readers MUST ignore JSON keys they do not
@@ -136,8 +145,10 @@ are not Probe files.
    conformance vectors that decode to the previous version's reference output wherever the
    content is the same, as `basic_v2.probe` does for v1. Readers SHOULD keep decoding every
    earlier version. An existing file is never rewritten; the `.evidx` sidecar (Appendix A) gives
-   v1 files v2's per-block positions without changing them. The next version string is
-   **`"evmin/6"`**, with the same `EVM4` magic and 8-byte prefix.
+   v1 files v2's per-block positions without changing them. v3 took **`"evmin/6"`** (section
+   9); within v3 a better coder is a new codec id, not a new version. The next version string,
+   should the container itself ever change, is **`"evmin/7"`**, with the same `EVM4` magic and
+   8-byte prefix.
 
 ---
 
@@ -925,7 +936,7 @@ show. The last column says how the conformance vectors test each one.
 
 | # | invariant | checkable from the file | vectors |
 |---|---|---|---|
-| I1 | Magic `EVM4`; `version` is `evmin/4` or `evmin/5`; `family rc`, `layout mkt` | yes | all; a patched `evmin/6` header must be refused |
+| I1 | Magic `EVM4`; `version` is `evmin/4`, `evmin/5` or `evmin/6`; `family rc` (`probe3` in v3), `layout mkt` | yes | all; a patched `evmin/7` header must be refused |
 | I2 | Every offset/length lies inside the body; `bidx` lengths sum to the `blocks` part | yes | all |
 | I3 | `bidx` rows strictly ascend, each `<= nmkt`; at most one block per row | yes | all |
 | I4 | A market block exists for a row **iff** its `ckpt` bit is set | yes | all |
@@ -1043,7 +1054,7 @@ contexts chosen per field (3.12).
 
 **Why it won.** Smallest of the configurations tested, at a cost a live writer can pay, with one
 code path. A future version can put the same modelled symbols under a faster entropy coder; that
-is the plan of the next version (section 9).
+is what v3 does (section 9).
 
 ### 7.4 Both clocks, and their units
 
@@ -1201,7 +1212,8 @@ repository.
 | `basic_v1.probe.evidx` | evidx/1 | - | the `.evidx` sidecar of `basic_v1.probe` (Appendix A) |
 
 Each `vec_*` vector decodes differently under the wrong reading it is named for; `basic_*` alone
-does not separate the dts-bucket or size-cache readings.
+does not separate the dts-bucket or size-cache readings. The v3 vectors, every vector above
+transcoded to each v3 profile, are in `tests/golden/v3/` (9.12).
 
 ### 8.2 What a conforming reader MUST reproduce
 
@@ -1277,25 +1289,437 @@ three readers agree on it.
     cargo test --workspace          # this repository's Rust reader and CLI
     probe dump FILE                 # the core dump of any file, with its digest
     probe dump --full FILE          # the full dump
+    probe transcode IN OUT          # a v3 file (profile fast) of any file; --profile fast1 | rc1
 
 ---
 
-## 9. Next version (informative)
+## 9. Probe v3 (`evmin/6`)
 
-Probe separates **the container**, what a file is, from **the codecs**, how each stream inside it
-is compressed. The container is the long-term contract: hour files, segments, per-market blocks,
-the block and time indexes, the markets table, both clocks and the checkpoints keep their meaning.
-The next version (v3, in design) makes the codec of each stream explicit:
+Probe v3 separates **the container**, what a file is, from **the codecs**, how each part inside it
+is compressed. The container keeps everything v1 and v2 define: hour files, 5-minute segments,
+one block per market per segment, the checkpoints, both clocks, the markets table, the side
+streams and the reference order. What v3 adds is a codec id on every part, a registry of those ids,
+and new codecs for the block index, the order and the blocks.
 
-- every stream carries a registered codec id and its parameters; a better coder is a new codec id,
-  not a new format;
-- an id once registered means the same bytes forever, and every codec ships conformance vectors
-  before it is registered;
-- profiles pick codecs by purpose: **FAST** (static multi-symbol tANS / rANS, interleaved and
-  SIMD), **BALANCED** (adaptive multi-symbol coding with the full context models) and **ARCHIVE**
-  (the strongest models), all lossless transcodes of one another and of v1 / v2.
+A v3 file is always made from a v1 or v2 file (or from another v3 file) by a lossless transcode:
+its core dump and its full dump (8.2) equal the source's byte for byte. Its side streams and its
+markets table are the source's bytes.
 
-Nothing in this section changes v1 or v2.
+Changes against v2, complete:
+
+1. The header `version` is `"evmin/6"` and `family` is `"probe3"`; new keys `profile`,
+   `src_version`, `mkunits`, `mkslugs` (9.1).
+2. Every part entry is `[name, offset, length, codec]` (9.1).
+3. The block index is the part `bidx3` (codec 18, 9.4) instead of `bidx`.
+4. The `order` part is codec 17 (9.5) instead of v1's move-to-front stream (3.6).
+5. The `blocks` part is codec 20 (model M2, 9.7, with the parts `tables` and `evcols`), codec 16
+   (model M1, 9.6, with `tables`), or codec 2 (v1's own blocks, 3.12).
+6. Two optional file parts summarise the markets table: `mkunits` (codec 22) and `mkslugs`
+   (codec 23) (9.8).
+
+### 9.1 Container
+
+The 8-byte prefix is v1's: magic `EVM4`, `u32 LE header_len`, then the header JSON and the body.
+A v1 / v2 reader reads `"evmin/6"` and refuses the file (2.2).
+
+The header is the source file's header JSON with these keys set. Every other key (`recorder`,
+`layout`, `unit_ns`, `seg_s`, `shift`, `flags`, `has_hash`, `hour_start_ns`, and per segment
+`t0_ns`, `nmkt`, `n_ev`, `n_lv`, `n_ck`, `ckpt`, `unsynced`) keeps its v1 meaning and the source's
+value.
+
+| key | value |
+|---|---|
+| `version` | `"evmin/6"` |
+| `family` | `"probe3"` |
+| `profile` | the profile the writer used: `"fast"`, `"fast1"` or `"rc1"` (9.9). Informative: readers go by the codec ids |
+| `src_version` | the source's version, `"evmin/4"` or `"evmin/5"` (a v3 source passes its own `src_version` on). It sets the layout of the side streams: arrival order for `evmin/4`, block order for `evmin/5` (3.9) |
+| `markets_zst` | `[offset, length]` of the source's markets table, byte for byte |
+| `mkunits`, `mkslugs` | optional `[offset, length]` of the file parts of 9.8 |
+| `segments[i].parts` | `[[name, offset, length, codec], ...]`, offsets into the body |
+
+The parts of a segment:
+
+| part | codec | content |
+|---|---|---|
+| `bidx3` | 18 | the block index (9.4) |
+| `blocks` | 20, 16 or 2 | the blocks, concatenated in `bidx3` order |
+| `tables` | 19 | with blocks codec 16 or 20: the segment's rANS frequency tables (9.3) |
+| `evcols` | 21 | with blocks codec 20: the segment's event columns (9.7) |
+| `order` | 17 | the reference order (9.5) |
+| `tx`, `payload.zst`, `hash` | 0 | the source's side streams, byte for byte (3.9) |
+
+A writer lays out each segment's parts in the order of this table's codec-20 profile (`tables`,
+`evcols`, `blocks`, `bidx3`, `order`, side streams), then `mkunits`, `mkslugs` and `markets_zst`.
+Readers MUST use the stated offsets and MUST NOT assume this order.
+
+The segment's `ckpt` bitmap and `unsynced` list are the source's. Every invariant of section 6
+holds as in the source; I8's "order `uv(n)`" reads "the order part's event count".
+
+### 9.2 The codec registry, and the rules that keep it stable
+
+| id | name | applies to | defined in |
+|---:|---|---|---|
+| 0 | raw | side streams | bytes as stored |
+| 1 | (reserved) | - | - |
+| 2 | rc1 | `blocks` | 3.10 - 3.12, with the header's `shift` and `flags` |
+| 16 | m1-rans | `blocks` (+ `tables`) | 9.6 |
+| 17 | order-ts | `order` | 9.5 |
+| 18 | cols-rans | `bidx3`, inside 17 and 22 | 9.3 |
+| 19 | rans-tables | `tables` | 9.3 |
+| 20 | m2-rans | `blocks` (+ `tables`, `evcols`) | 9.7 |
+| 21 | m2-evcols | `evcols` | 9.7 |
+| 22 | mk-units | file part `mkunits` | 9.8 |
+| 23 | mk-slugs | file part `mkslugs` | 9.8 |
+
+The rules (the stability contract of v3):
+
+1. **The container is stable.** Readers locate parts by name, ignore part names and JSON keys
+   they do not know, and decode each part with the codec its entry names.
+2. **Codecs are added, never redefined.** A codec id, once registered, means the same bytes
+   forever. A better coder is a new id, not a new version of the format. New ids are appended.
+3. **A reader refuses a codec id it does not implement.** It MUST NOT guess. A known part under an
+   unknown codec makes the file unsupported, not corrupt.
+4. **Every registered codec has conformance vectors** (9.12): files whose decode is pinned by
+   their core dump.
+5. **Lossless across profiles.** Every v3 file decodes to the core dump of its source, and every
+   profile transcodes into every other, except that `rc1` keeps v1 block bytes and is made from a
+   v1 or v2 source.
+
+### 9.3 Static rANS (codecs 18 and 19)
+
+The codecs 16 - 22 code their symbols with **static rANS**: one frequency table per context,
+fixed for the segment (or the part), and a decoder that is a table lookup per symbol.
+
+**Streams.** A stream is two 32-bit states and a sequence of 16-bit words:
+
+    u32 LE x0, u32 LE x1, then u16 LE words, in the order the decoder reads them
+
+The decoder holds two states. Operation k of the stream (k = 0, 1, ...) uses state `x[k mod 2]`.
+An operation is a **symbol** of a context, or a **raw chunk** of 1 to 16 bits.
+
+- A symbol of a context with table log `L` and frequencies `f` (cumulative `c`): with
+  `s = x & (2^L - 1)`, the symbol is the one with `c[sym] <= s < c[sym] + f[sym]`, and
+  `x = f[sym] * (x >> L) + s - c[sym]`.
+- A raw chunk of n bits: the value is `x & (2^n - 1)`, and `x = x >> n`.
+- After either, if `x < 2^16`, then `x = (x << 16) | next word`.
+- A context whose table has **one symbol** costs no operation: the decoder returns that symbol
+  and touches no state. A context with **no symbol** MUST NOT be used; a stream that uses one is
+  corrupt.
+- At the end of a stream both states MUST equal `2^16` and every word MUST have been read.
+  Anything else (a word missing, a word left over, another final state) means the stream is
+  corrupt.
+
+**Integers.** An integer `v` (0 <= v < 2^63) in context C is coded as `x = v + 1`,
+`n = bitlen(x) - 1`: one symbol `4n + m` in C, where `m` is the 2 bits after the leading one of x
+(for n < 2, its n bits after the leading one), then, for n > 2, the `n - 2` low bits of x as raw
+chunks of at most 16 bits, most significant chunk first. As code:
+
+    x = v + 1; n = 63 - leading_zeros(x)
+    if n <= 2: symbol 4n + (x & (2^n - 1))
+    else:      symbol 4n + ((x >> (n - 2)) & 3); raw(n - 2, x & (2^(n-2) - 1))
+    raw(k, bits): while k > 0: c = min(k, 16); k -= c; chunk of c bits = (bits >> k) & (2^c - 1)
+
+The decoder reverses it: symbol s gives `n = s >> 2`, `m = s & 3`; for n <= 2, `x = 2^n | m`;
+else `x = ((4 | m) << (n - 2)) | raw(n - 2)`; `v = x - 1`.
+
+**Tables (codec 19).** A set of context tables:
+
+    uv(n_contexts)
+    per context: uv(n_symbols); if n_symbols > 0: u8 log, then per symbol in ascending order
+                 uv(symbol - previous symbol) uv(frequency - 1)
+
+The first symbol's gap is the symbol itself (from 0); later gaps are >= 1; symbols are < 256.
+`log` is 5 to 12, and the frequencies of a context MUST sum to exactly `2^log`. A `tables` part is
+one such set, with exactly 160 contexts for codec 16 and 184 for codec 20, and nothing after it.
+
+How a writer chooses the frequencies is not part of the format; this repository's writer is
+deterministic (integer arithmetic only): per context it normalises the segment's counts to `2^12`
+(floor, the remainder to the largest fractional parts, ties to the lower symbol, every used symbol
+at least 1), then takes the smallest log in 5..12 whose cost on the counts is within 0.2 % (or 64
+bits) of the cost at `2^12`. Small tables keep the decoder's working set in the L1 / L2 cache.
+
+**Integer columns (codec 18).** A table of `rows` rows and a fixed number of integer columns:
+
+    uv(rows), a codec-19 table set with one context per column, one stream
+
+The stream holds the values row by row, column after column within a row, each an integer in the
+context of its column. The number of columns is fixed by the part that uses the layout.
+
+### 9.4 The block index (`bidx3`)
+
+Codec 18 with 9 columns, one row per block in ascending market row:
+
+| column | value |
+|---|---|
+| 0 | the first row: its market row; later rows: `row - previous row - 1` |
+| 1 | the block's byte length in `blocks` |
+| 2 | the block's events, checkpoints included |
+| 3 | its leading checkpoints |
+| 4 | its levels, checkpoint levels included |
+| 5 - 8 | v2 sources: the block's `n_trade`, `n_pay`, `n_hash`, `n_bex` (3.7); 0 for a v1 source |
+
+Rows are at most `nmkt` (the type-4 block). The lengths MUST sum to the `blocks` part. Column 3
+summed MUST equal `n_ck`, and column 2 summed `n_ev + n_ck`. With `src_version` `evmin/5`, columns
+2, 4 and 5 - 8 are the block's v2 counts, and the side streams are placed by their prefix sums
+exactly as in v2 (3.7, 3.9).
+
+A block decodes to exactly its counts: column 2 events, of which the first column-3 are the
+checkpoints and no later one is, and column-4 levels.
+
+### 9.5 The reference order (codec 17)
+
+The real events of a segment are first put in the **canonical order**: ascending receive clock
+`ts`, ties by the event's index in **block order** (block after block in `bidx3` order, each
+block's events in order, checkpoints excluded).
+
+The `order` part is codec 18 with 2 columns, one row per **deferral**: `(run, d - 1)`. `run` is
+the number of canonical positions since the previous deferral (from the start for the first).
+The decoder walks the canonical order with an output position t, starting at 0:
+
+1. If a waiting event's target is t, emit it (targets are distinct).
+2. Else take the next canonical event. If it is the next deferral (its canonical position is the
+   previous deferral's position + 1 + run, or run for the first), it waits with target
+   `t + d`, and the decoder goes back to 1 without advancing t.
+3. Else emit it.
+
+Emitting advances t. The walk ends when every real event is emitted; every deferral MUST have
+been used, no event may still wait, and no target may have been passed. The emitted sequence is
+the segment's **arrival order**. Every block's own events MUST appear in it in block order (a
+block's events are its market's events in arrival order).
+
+A writer derives the deferrals from the arrival order: walking the canonical order, an event
+reached before its arrival position a becomes a deferral with `d = a - t`. Every permutation has
+this form; on real data it is cheap, because the arrival order is almost the clock order.
+
+The **reference order** of the segment is then, as in v1 (5.1): every block's leading checkpoints,
+blocks in `bidx3` order, then the real events in arrival order.
+
+### 9.6 Model M1 (codec 16)
+
+One block = one market's events of the segment, decoded alone: every state below is reset at the
+start of the block, so blocks decode in parallel and one market reads only its blocks. A block is
+one rANS stream (9.3) with the segment's `tables`; it decodes its column-2 count of events.
+
+**State, reset per block** (U is the block row's U, 1 for the type-4 block; `ts0 = t0_ns / unit_ns`):
+`prev_et = 0`; `prev_ts = ts0`; `prev_dts = 0`; `prev_lat[4] = 0`; `prev_cont = 0`;
+`prev_out[6] = 0`; `prev_pc_out = 0`; `prev_side[2] = 0`; `prev_tr_side[2] = 0`;
+`prev_dp[2] = 0`; `last_px[2] = 0`; `last_trade[2] = 0`; a book per outcome and side, every
+price `0..U` at size 0; two size caches per outcome, `cache[out][path]` for path 0 (absolute) and
+1 (delta), each an empty list of at most 8 values.
+
+`best_bid[out]` is the highest price of the outcome's bid side with size > 0, `best_ask[out]` the
+lowest of its ask side; a side with no level has no best.
+
+**Contexts** (number = base + index):
+
+| context | base | count | index |
+|---|---:|---:|---|
+| ET | 0 | 6 | `prev_et` |
+| DTS | 6 | 18 | `et * 3 + bucket(prev_dts)` |
+| LAT | 24 | 4 | `et` |
+| CONT | 28 | 2 | `prev_cont` |
+| OUT | 30 | 12 | `et * 2 + prev_out[et]` |
+| NLV | 42 | 4 | `k5 * 2 + side` (k5 = 1 for a checkpoint) |
+| BOOKDP | 46 | 12 | `kind * 4 + side * 2 + first` |
+| SZMODE | 58 | 12 | `kind * 4 + side * 2 + (cur > 0)` |
+| SZIDX | 70 | 6 | `kind * 2 + path` |
+| SZDEC | 76 | 12 | `kind * 4 + path * 2 + side` |
+| SZLIT | 88 | 48 | `(kind * 4 + path * 2 + side) * 4 + min(e, 3)` |
+| NENT | 136 | 1 | - |
+| MIRROR | 137 | 2 | `(entry index > 1)` |
+| PCHEAD | 139 | 8 | `prev_pc_out * 4 + prev_side[0] * 2 + prev_side[1]` |
+| PCPRICE | 147 | 6 | `side * 3 + dpbucket(prev_dp[out])` |
+| TRSIDE | 153 | 4 | `out * 2 + prev_tr_side[out]` |
+| TRPRICE, TRSIZE, TRFEE | 157, 158, 159 | 1 each | - |
+
+160 contexts. `kind` is 0 for a type-0 book event, 1 for a price_change entry, 2 for a checkpoint.
+`bucket(u)` is 0 for u = 0, 1 for u < 1024, else 2; `dpbucket(u)` is 0 for u = 0, 1 for u <= 2,
+else 2. "sym C" reads a symbol of context C, "int C" an integer (9.3).
+
+**Per event:**
+
+1. `et = sym ET`; `prev_et = et`. et > 5 is corrupt.
+2. Unless et = 5: `u = int DTS`; `prev_dts = u`; `prev_ts += unzz(u)`; the event's `ts = prev_ts`.
+   A checkpoint's ts is 0.
+3. If et <= 3: `lat = prev_lat[et] + unzz(int LAT)`; `prev_lat[et] = lat`. Else lat = 0.
+4. If et = 0: `cont = sym CONT`; `prev_cont = cont`.
+5. If et is 0, 2, 3 or 5: `out = sym OUT`; `prev_out[et] = out`. Else out = 0.
+6. The event's levels:
+   - **et 0 or 5** (a book event or a checkpoint of outcome out): `nb = int NLV[k5, 0]`,
+     `na = int NLV[k5, 1]`, each at most U + 1. Then for the bids (side 0) and the asks (side 1):
+     `p = -1`; per level `p += int BOOKDP + 1` (`first` = 1 for the side's first level; p <= U);
+     `z = SIZE(kind, out, side, p)`; write `book[out][side][p] = z`; emit the level
+     `(out, side, p, z)`.
+   - **et 1** (price_change): `n = int NENT`. Per entry i (from 0): if the previous entry was
+     explicit and `sym MIRROR = 1`, the entry is the **mirror** of that explicit entry
+     `(out, side, p, z)`: the level `(1 - out, 1 - side, U - p, z)` with the mirror flag, written
+     to the book; the next entry then has no explicit predecessor. Otherwise it is explicit:
+     `h = sym PCHEAD`; `out = h >> 1`, `side = h & 1`; `prev_pc_out = out`;
+     `prev_side[out] = side`; `d = unzz(int PCPRICE)`; `prev_dp[out] = |d|`. The price is
+     `p = best_bid[out] - d` for a bid with a best bid, `p = best_ask[out] + d` for an ask with a
+     best ask, else `p = last_px[out] + d`; p MUST be in `[0, U]`. Then `last_px[out] = p`,
+     `last_px[1 - out] = U - p`, `z = SIZE(1, out, side, p)`, write the book, emit the level.
+   - **et 2** (trade of outcome out): `side = sym TRSIDE`; `prev_tr_side[out] = side`;
+     `last_trade[out] += unzz(int TRPRICE)`; `z = int TRSIZE`; `fee = int TRFEE`; emit the level
+     `(out, side, last_trade[out], z)`. A trade does not change the book.
+   - **et 3, 4**: no levels.
+
+**SIZE(kind, out, side, p)**, with `cur = book[out][side][p]`:
+
+1. `mode = sym SZMODE`: 0 absolute literal, 1 absolute cache hit, 2 delta literal, 3 delta cache
+   hit; `path = mode >> 1`. mode > 3 is corrupt.
+2. A hit: `i = int SZIDX`; `v = cache[out][path][i]` (i MUST be inside the list). A literal:
+   `e = sym SZDEC` (e <= 6), `q = int SZLIT`; `v = q * 10^e` on path 0, `unzz(q) * 10^e` on
+   path 1.
+3. Move v to the front of `cache[out][path]`: if the list holds v, v moves to the front; else v
+   is inserted at the front and the 9th value drops.
+4. `z = v` on path 0, `z = cur + v` on path 1; path 1 needs `cur > 0`, and z MUST be >= 0.
+
+The writer chooses the coding of each size (a hit on the lower index of the two caches beats a
+literal; between literals the one with fewer bits); every choice decodes to the same size.
+
+A block's decode MUST end with its stream finished (9.3), its event and level counts equal to its
+`bidx3` row, its checkpoints leading, and type-4 events only in the type-4 block.
+
+### 9.7 Model M2 (codecs 20 and 21)
+
+M2 is M1 with the event-level fields of every event, which do not depend on the book, moved out of
+the block into the segment's **event columns** (`evcols`): event type, outcome, cont, receive
+clock and latency. They decode in a tight loop before the blocks, and the reference order needs
+only them.
+
+**`evcols` (codec 21).** The columns are split into **lanes**, runs of whole blocks, each its own
+rANS stream with the segment's `tables`:
+
+    uv(n_lanes)
+    n_lanes x uv(first block - previous first block)    (the first is 0, later ones >= 1)
+    n_lanes x uv(stream bytes)
+    the lane streams, in order
+
+Lane j covers the blocks from its first block up to the next lane's first (the last lane: to the
+end). The lanes MUST cover every block and the part exactly. The writer starts a new lane at the
+first block after the current lane reached 16,384 events.
+
+Per block of a lane, in order, the column state is reset (`prev_et = 0`, `last_out = 0`,
+`prev_ts = ts0`, `prev_dts = 0`, `prev_lat[4] = 0`), then per event of the block (its column-2
+count):
+
+1. `s = sym EOC`, context `160 + prev_et * 2 + last_out`; `et = s >> 2`, `out = (s >> 1) & 1`,
+   `cont = s & 1`. et > 5, cont = 1 outside et 0, or out = 1 for et 1 or 4 is corrupt.
+   `prev_et = et`; if et is 0, 2, 3 or 5, `last_out = out`.
+2. The receive clock and the latency exactly as M1's steps 2 and 3 (contexts DTS, LAT).
+
+**The blocks (codec 20).** Each block is one stream with the segment's `tables`. The M1 state is
+reset per block; per event (fields from the columns), the levels are decoded as in M1's step 6,
+with one change: the SIZE mode and cache index are **one symbol** of context
+`SZM = 172 + kind * 4 + side * 2 + (cur > 0)`:
+
+| SZM symbol | meaning |
+|---|---|
+| 0 | absolute literal (SZDEC, SZLIT as M1, path 0) |
+| 1 | delta literal (path 1) |
+| 2 + i, i < 8 | absolute cache hit at index i |
+| 10 + i, i < 8 | delta cache hit at index i |
+
+Contexts CONT, OUT, SZMODE and SZIDX are unused by M2; ET is replaced by EOC. 184 contexts in all.
+The fee of a trade is in the block (TRFEE), as in M1.
+
+### 9.8 The markets parts (codecs 22, 23)
+
+`mkunits` (codec 22) is codec 18 with 4 columns, one row per market row: `U`,
+`price_unit_micro`, `size_unit_micro`, `trade_size_unit_micro`. `mkslugs` (codec 23) is one zstd
+frame holding the rows' slugs joined by LF. They let a reader resolve a slug and decode blocks
+without parsing the markets table's JSON. When present they MUST agree with `markets_zst`; a writer
+omits both when a unit is negative or a slug holds an LF. Readers MAY ignore them.
+
+### 9.9 Profiles
+
+| profile | `blocks` codec | for |
+|---|---|---|
+| **fast** (default) | 20, with `tables` and `evcols` | the smallest files and the fastest decode |
+| **fast1** | 16, with `tables` | the M1 model: one stream per block, no event columns |
+| **rc1** | 2 | v1's blocks byte for byte, with v3's order and index; made from v1 / v2 only |
+
+All three use codecs 17 and 18 and keep the side streams and the markets table byte for byte. The
+profile name is recorded in the header for information only.
+
+### 9.10 Reading v3
+
+- **Full decode of a segment**: the `tables`; for codec 20 the event columns, lane by lane (lanes
+  are independent); every block (blocks are independent); then the canonical order and the
+  deferrals (9.5). The result is the same reference order as 5.1.
+- **One market** (5.2): the market's rows, then through `bidx3` only their blocks. A block carries
+  its own clocks, so no other block and no order part is read. With codec 20 a block also needs its
+  lane of `evcols`, decoded up to the block. Its events in block order are its events in arrival
+  order.
+- **The book at time T** (5.4): the block's events up to the first non-checkpoint event with
+  `ts > T`, with the replay rule of 5.3 (levels of types 0, 1 and 5 written to the book; trades
+  do not change it).
+- **Side streams**: as the source version places them (`src_version`, 3.9); with `evmin/5`, from
+  the `bidx3` counts.
+
+### 9.11 Design rationale and measurements
+
+**What v1 spends that v3 does not.** Measured on the production hour:
+
+- **v1 stores the arrival order twice.** Every block codes its events' receive clock (145 MB of
+  the hour's 419 MB of blocks), and the `order` stream codes the block of every event in arrival
+  order again (84.7 MB, 15.9 % of the file). The arrival order is almost the receive-clock order:
+  0.7 % of arrival steps go back in time. v3 keeps the clocks in the blocks and stores only the
+  events whose arrival is out of clock order, as deferrals: 59,843 deferrals in 5,310,852 events of
+  one segment (1.1 %), at most 188 waiting at once, 0.78 MB for the hour.
+- **v1 codes 5.1 G binary decisions with models that restart at p = 0.5 in each of 942,968 small
+  blocks** (about 445 bytes each). The same predictions coded with static tables fitted per
+  segment come to 391 MB of blocks for the hour against v1's 419 MB: a block is too short to pay
+  back an adaptive model's learning. v3 codes the predictions of v1 (the book, best prices, size
+  caches, last prices) with multi-symbol static tables and rANS: fewer, wider symbols, a table
+  lookup per symbol instead of a loop over binary decisions, and no learning cost per block.
+
+**Other choices, measured.**
+
+| choice | measured | outcome |
+|---|---|---|
+| the arrival order as a block id per event (move-to-front, frequency-ranked escape) | 90.2 - 93.8 MB for the hour, and a one-market read would need the whole arrival stream | not adopted |
+| the arrival order as the canonical clock order plus deferrals | 0.78 MB for the hour, a radix sort and a small heap to decode | **adopted (codec 17)** |
+| size literals as trailing decimal zeros + quotient | size literals 112.0 MB -> 92.5 MB (-17 %) | **adopted (M1, M2)** |
+| the same split on receive-clock gaps | -4 % | not adopted |
+| per-context table precision 2^5 .. 2^12 instead of 2^12 everywhere | +0.05 % bytes, a decoder working set of 383 KB instead of about 1.1 MB, and a faster decode | **adopted** |
+| event-level fields in per-segment columns (M2) | blocks + columns -0.3 % against M1, and a faster decode on many cores | **adopted (codecs 20, 21)** |
+| `mkunits` + `mkslugs` beside the markets table | +0.3 % of an hour; opening a file no longer parses the table's JSON | **adopted (codecs 22, 23)** |
+| events in arrival order, every field in its own stream | each event would touch per-market state at random (174 k markets); an estimated cache miss per event costs more than the whole decode budget | not adopted: the block layout keeps a market's state hot |
+| checkpoints predicted from the previous segment's book | 85.5 % of checkpoint levels equal the replayed book; would save most of the checkpoints' bytes, but a segment would no longer decode alone | a candidate for a later codec id |
+| adaptive multi-symbol coding with the static table as prior | entropy -5 % against static (an estimate from symbol counts, not a codec run) | a candidate for a later codec id |
+
+**Measured: the production hour** (63,621,962 events, 163,913,630 levels), every encoding of it
+on one GCP e2-standard-8 VM (AMD EPYC 7B12, 8 vCPU, 32 GB) in the same boot, with the reference
+implementation of these codecs. Decode = from the file to every event and level in memory, in the
+reference order; one market = open the file and decode one market's blocks; v3 times are the best
+of 3 runs. The core-dump digest `a3211f02123324bf` is equal for v1 and for v3 in every profile.
+
+| encoding | bytes | decode, 1 core | decode, 8 cores | one market |
+|---|---:|---:|---:|---:|
+| **v3 fast** | **405,429,923** | **13.84 s** | **3.36 s** | **0.19 s** |
+| v3 fast1 | 406,362,525 | 17.53 s | 6.07 s | 0.22 s |
+| v3 rc1 | 451,485,094 | 40.72 s | 10.00 s | 0.20 s |
+| v1 | 533,465,796 | 51.06 s | 12.47 s | 0.37 s |
+
+- v3 fast is 24 % smaller than v1 and decodes 3.7 times faster, on 1 core and on 8.
+- Transcoding v1 to v3 fast took 43.7 s on 8 threads and 111.8 s on 1, at 1.3 GB peak memory.
+
+### 9.12 Conformance
+
+The v3 vectors are in `tests/golden/v3/`: every v1 / v2 vector of 8.1 transcoded to each profile,
+`NAME.PROFILE.probe` (30 files). Their expected core dumps are in `tests/expected/v3/`.
+
+1. The core dump of every v3 vector MUST equal its expected dump, which is byte-identical to the
+   core dump of its source vector (8.3: the same digests).
+2. The full dump of every v3 vector MUST equal its source's `events.csv`, and its books at the
+   queries of `*.books_queries.csv` MUST equal `*.books.csv`.
+3. A reader MUST refuse an unknown version, family, `src_version` or codec id (9.2).
+
+The vectors also pin this repository's writer: transcoding each source vector to a profile MUST
+give the vector's bytes. That is a property of one writer (6, I15), not of the format; another
+conforming writer may choose other tables or lanes.
 
 ---
 
@@ -1306,12 +1730,17 @@ Nothing in this section changes v1 or v2.
 | **block** | one market row's events in one segment, or the segment's type-4 events, range-coded with fresh state; decodes alone |
 | **block id** | a market row `0..nmkt-1`, or `nmkt` for the type-4 block |
 | **bidx** | the segment's block index: row and length per block, plus six counts in v2 |
+| **bidx3** | v3's block index: nine integer columns per block (9.4) |
+| **canonical order** | v3: a segment's real events by receive clock, ties in block order (9.5) |
+| **codec id** | v3: the registered number naming how a part is coded; never redefined (9.2) |
 | **checkpoint** | a type-5 event: a token's full book at its block's start |
 | **ckpt bitmap** | per segment, one bit per market row: the row has a block, opening with checkpoints |
 | **cont** | the bit marking a book event that is not the first event object of its websocket frame |
 | **core dump** | the conformance text of events and levels without side streams (8.2) |
+| **deferral** | v3: a real event emitted later than its canonical position, stored as (run, d - 1) (9.5) |
 | **dts** | the receive-clock delta from the previous event of the block (from `ts0` at the start) |
-| **evmin** | the format's working name, kept in the version strings: evmin/4 = Probe v1, evmin/5 = Probe v2 |
+| **event columns, lane** | v3 model M2: the event-level fields of a segment's events, in lanes of whole blocks, each its own rANS stream (9.7) |
+| **evmin** | the format's working name, kept in the version strings: evmin/4 = Probe v1, evmin/5 = Probe v2, evmin/6 = Probe v3 |
 | **exception (best)** | a `"b"` row: a delivered best_bid / best_ask that differs from the rebuilt book |
 | **flags** | header bits selecting coding variants (3.11) |
 | **gamma** | adaptive Elias-gamma code of a non-negative integer (3.10.4) |
@@ -1323,7 +1752,9 @@ Nothing in this section changes v1 or v2.
 | **mirror** | a price_change entry equal to the reflection of the previous explicit entry (other outcome, flipped side, `U - p`, same size), stored as one bit |
 | **nmkt** | market rows in use for a segment; also the type-4 block's id |
 | **order stream** | the block id of every real event in arrival order |
+| **profile** | v3: a writer's choice of codecs (`fast`, `fast1`, `rc1`), recorded in the header for information (9.9) |
 | **range coder** | the LZMA-style binary arithmetic coder of 3.10 |
+| **rANS** | v3's entropy coder: static per-context tables, two interleaved 32-bit states (9.3) |
 | **real event** | any event other than a checkpoint |
 | **reference order** | a segment's decoded order: every block's checkpoints by ascending row, then the real events in arrival order |
 | **segment** | 300 s of a file, starting at a multiple of 300 s |
