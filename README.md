@@ -1,10 +1,17 @@
-# Probe
+<p align="center">
+  <a href="https://probnode.com"><img src="assets/probnode-logo.png" alt="ProbNode" width="96" height="96"></a>
+</p>
 
-[![CI](https://github.com/probnode/probe/actions/workflows/ci.yml/badge.svg)](https://github.com/probnode/probe/actions/workflows/ci.yml)
-[![crates.io](https://img.shields.io/crates/v/probe-format.svg)](https://crates.io/crates/probe-format)
-[![PyPI](https://img.shields.io/pypi/v/probe-format.svg)](https://pypi.org/project/probe-format/)
-[![docs.rs](https://img.shields.io/docsrs/probe-format)](https://docs.rs/probe-format)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+<h1 align="center">Probe</h1>
+
+<p align="center">
+  <a href="https://github.com/probnode/probe/actions/workflows/ci.yml"><img src="https://github.com/probnode/probe/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <img src="https://img.shields.io/badge/rust-1.85%2B-orange" alt="Rust 1.85+">
+  <img src="https://img.shields.io/badge/python-3.9%2B-blue" alt="Python 3.9+">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="Apache-2.0"></a>
+</p>
+
+<p align="center"><b>The lossless file format for prediction-market order books.</b></p>
 
 **Probe** is a lossless file format for prediction-market order books. One file holds one UTC hour
 of a venue (today: Polymarket): every change of every price level of every outcome token at full
@@ -23,6 +30,15 @@ reference implementations:
 | [tests/golden](tests/golden) | conformance vectors and the outputs every reader must reproduce byte for byte |
 
 ## Install
+
+The packages go to crates.io and PyPI with the first release. Until then, from this repository:
+
+```sh
+cargo install --path probe-cli    # the probe command
+cargo build --release             # the library
+```
+
+Once released:
 
 ```sh
 cargo add probe-format            # the Rust library
