@@ -7,7 +7,7 @@ default-members = ["probe", "probe-cli"]
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.82"
+rust-version = "1.85"
 license = "Apache-2.0"
 authors = ["ProbNode <hello@probnode.com>"]
 repository = "https://github.com/probnode/probe"
