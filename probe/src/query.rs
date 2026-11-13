@@ -224,7 +224,7 @@ impl<'a> Query<'a> {
                 let held: Vec<usize> = rows.iter().copied().filter(|&r| s.has_row(r)).collect();
                 if held.is_empty() {
                     Vec::new()
-                } else if self.side && f.header.version == Version::V1 {
+                } else if self.side && f.header.side_layout() == Version::V1 {
                     let all = f.segment_events_opts(si, self.hashes)?;
                     all.into_iter()
                         .filter(|e| e.kind != EventType::Other && held.contains(&e.row))

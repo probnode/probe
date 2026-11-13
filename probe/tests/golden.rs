@@ -342,7 +342,7 @@ fn patched(name: &str, from: &str, to: &str) -> Vec<u8> {
 #[test]
 fn refuses_unknown_versions_and_variants() {
     for (from, to) in [
-        ("\"evmin/5\"", "\"evmin/6\""),
+        ("\"evmin/5\"", "\"evmin/7\""),
         ("\"layout\":\"mkt\"", "\"layout\":\"tim\""),
         ("\"family\":\"rc\"", "\"family\":\"xx\""),
     ] {

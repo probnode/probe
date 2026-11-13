@@ -1,5 +1,7 @@
 //! The decoder core: blocks, the order stream and the reference order of a segment (5.1 steps
 //! 1-4), without the side streams. This is the fast path; [`crate::Event`] adds the side streams.
+//! A v3 segment decodes through the same API: its blocks into [`Block`]s, its order part into the
+//! same arrival order.
 
 use crate::error::{format_err, Error, Result};
 use crate::file::File;
@@ -10,7 +12,7 @@ use crate::walker::{Walker, ET_CHECKPOINT, ET_OTHER, ET_TRADE};
 use std::io::Write;
 
 /// One decoded block.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Block {
     /// The block's market row, or the segment's `nmkt` for the type-4 block.
     pub row: usize,
@@ -32,7 +34,7 @@ impl Block {
 
 /// A decoded segment: its blocks in block-index order, and the reference order as
 /// (block index, event index in the block) pairs.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SegmentCore {
     /// The blocks, in block-index order.
     pub blocks: Vec<Block>,
@@ -76,7 +78,13 @@ impl File {
             .ok_or_else(|| Error::Format(format!("segment {}: block {} outside its part", si, bi)))
     }
 
-    fn walk(&self, w: &mut Walker, si: usize, bi: usize, limit: Option<i64>) -> Result<Block> {
+    pub(crate) fn walk(
+        &self,
+        w: &mut Walker,
+        si: usize,
+        bi: usize,
+        limit: Option<i64>,
+    ) -> Result<Block> {
         let s = self.seg(si)?;
         let row = s
             .blocks
@@ -124,6 +132,9 @@ impl File {
 
     /// Decodes block `bi` (an index into the segment's block index) alone.
     pub fn decode_block(&self, si: usize, bi: usize) -> Result<Block> {
+        if self.is_v3() {
+            return self.v3_block(si, bi);
+        }
         self.walk(&mut Walker::new(), si, bi, None)
     }
 
@@ -137,6 +148,9 @@ impl File {
         bi: usize,
         limit: i64,
     ) -> Result<(Block, [[Vec<(i64, i64)>; 2]; 2])> {
+        if self.is_v3() {
+            return self.v3_block_until(si, bi, limit);
+        }
         let mut w = Walker::new();
         let b = self.walk(&mut w, si, bi, Some(limit))?;
         let book = [
@@ -147,7 +161,12 @@ impl File {
     }
 
     /// Decodes segment `si`'s order stream: the block id of every real event in arrival order.
+    /// In v3 the order part needs the blocks' clocks, so this decodes the segment's blocks.
     pub fn decode_order(&self, si: usize) -> Result<Vec<u32>> {
+        if self.is_v3() {
+            let blocks = self.v3_blocks(si, cfg!(feature = "parallel"))?;
+            return self.v3_ids(si, &blocks);
+        }
         let s = self.seg(si)?;
         let b = self
             .part_bytes(si, "order")
@@ -162,6 +181,11 @@ impl File {
 
     /// Decodes segment `si` into its blocks and the reference order, on one thread.
     pub fn segment_core(&self, si: usize) -> Result<SegmentCore> {
+        if self.is_v3() {
+            let blocks = self.v3_blocks(si, false)?;
+            let ids = self.v3_ids(si, &blocks)?;
+            return self.assemble(si, blocks, ids);
+        }
         let n = self.seg(si)?.blocks.len();
         let mut w = Walker::new();
         let mut blocks = Vec::with_capacity(n);
@@ -176,6 +200,11 @@ impl File {
     #[cfg(feature = "parallel")]
     pub fn segment_core_par(&self, si: usize) -> Result<SegmentCore> {
         use rayon::prelude::*;
+        if self.is_v3() {
+            let blocks = self.v3_blocks(si, true)?;
+            let ids = self.v3_ids(si, &blocks)?;
+            return self.assemble(si, blocks, ids);
+        }
         let n = self.seg(si)?.blocks.len();
         let chunk = 64usize;
         let (ids, blocks) = rayon::join(
@@ -479,7 +508,7 @@ pub fn core_dump(f: &File, mut out: Option<&mut dyn Write>) -> Result<CoreDumpSu
                 e.out,
                 e.cont,
                 floor_div(tns, 1000),
-                floor_div(tns, 1_000_000) - e.lat,
+                floor_div(tns, 1_000_000).wrapping_sub(e.lat),
                 e.fee
             );
             for (k, l) in b.event_levels(j as usize).iter().enumerate() {

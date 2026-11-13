@@ -66,7 +66,7 @@ impl PyFile {
         })
     }
 
-    /// "v1" or "v2".
+    /// "v1", "v2" or "v3".
     #[getter]
     fn version(&self) -> String {
         self.inner.version().to_string()
@@ -75,8 +75,9 @@ impl PyFile {
     /// The header as a JSON object string.
     fn header_json(&self) -> String {
         let h = self.inner.header();
+        let opt = |v: Option<&str>| v.map_or("null".to_string(), |s| format!("{:?}", s));
         format!(
-            "{{\"version\":\"{}\",\"header_version\":\"{}\",\"recorder\":{:?},\"unit_ns\":{},\"seg_s\":{},\"shift\":{},\"flags\":{},\"has_hash\":{},\"hour_start_ns\":{},\"bytes\":{},\"markets\":{},\"segments\":{}}}",
+            "{{\"version\":\"{}\",\"header_version\":\"{}\",\"recorder\":{:?},\"unit_ns\":{},\"seg_s\":{},\"shift\":{},\"flags\":{},\"has_hash\":{},\"hour_start_ns\":{},\"bytes\":{},\"markets\":{},\"segments\":{},\"profile\":{},\"source_version\":{}}}",
             self.inner.version(),
             h.version.header_str(),
             h.recorder,
@@ -88,8 +89,23 @@ impl PyFile {
             h.hour_start_ns,
             self.inner.size(),
             self.inner.markets().len(),
-            self.inner.segments().len()
+            self.inner.segments().len(),
+            opt(h.profile.as_deref()),
+            opt(h.source_version.map(|v| v.header_str()))
         )
+    }
+
+    /// Transcodes the file into a Probe v3 file at `path` (profile "fast", "fast1" or "rc1");
+    /// returns the bytes written.
+    #[pyo3(signature = (path, profile = "fast"))]
+    fn transcode(&self, py: Python<'_>, path: &str, profile: &str) -> PyResult<usize> {
+        let p = probe_format::v3::Profile::parse(profile)
+            .ok_or_else(|| PyValueError::new_err(format!("unknown profile {:?}", profile)))?;
+        let out = py
+            .allow_threads(|| probe_format::v3::transcode(&self.inner, p))
+            .map_err(err)?;
+        std::fs::write(path, &out.bytes).map_err(|e| PyIOError::new_err(e.to_string()))?;
+        Ok(out.bytes.len())
     }
 
     /// The segments: (t0_ns, nmkt, blocks, n_ev, n_lv, n_ck).

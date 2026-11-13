@@ -177,3 +177,74 @@ fn verify_and_book() {
     }
     assert_eq!(got, want);
 }
+
+/// `probe transcode` writes the committed v3 vector; info, dump, verify, cat and book read it.
+#[test]
+fn transcode_and_read_v3() {
+    for (profile, codec) in [("fast", "m2-rans"), ("fast1", "m1-rans"), ("rc1", "rc1")] {
+        let out = tmp(&format!("basic_v2.{}.probe", profile));
+        let o = out.to_str().unwrap();
+        let (code, stdout, err) = probe(&[
+            "transcode",
+            &golden("basic_v2.probe"),
+            o,
+            "--profile",
+            profile,
+            "--verify",
+        ]);
+        assert_eq!(code, 0, "{}", err);
+        let v: serde_json::Value = serde_json::from_slice(&stdout).unwrap();
+        assert_eq!(v["profile"], profile);
+        assert_eq!(v["verified"], true);
+        let committed = std::fs::read(golden(&format!("v3/basic_v2.{}.probe", profile))).unwrap();
+        assert!(
+            std::fs::read(&out).unwrap() == committed,
+            "{}: bytes differ",
+            profile
+        );
+
+        let (code, stdout, err) = probe(&["info", "--json", o]);
+        assert_eq!(code, 0, "{}", err);
+        let v: serde_json::Value = serde_json::from_slice(&stdout).unwrap();
+        assert_eq!(v["version"], "v3");
+        assert_eq!(v["header_version"], "evmin/6");
+        assert_eq!(v["profile"], profile);
+        assert_eq!(v["source_version"], "evmin/5");
+        let (code, stdout, _) = probe(&["info", o]);
+        assert_eq!(code, 0);
+        let text = String::from_utf8(stdout).unwrap();
+        assert!(text.contains("v3 (evmin/6)"), "{}", text);
+        assert!(text.contains(&format!(" {}", codec)), "{}", text);
+        assert!(
+            text.contains("bidx3") && text.contains("cols-rans"),
+            "{}",
+            text
+        );
+
+        let (code, stdout, err) = probe(&["dump", o]);
+        assert_eq!(code, 0, "{}", err);
+        let want = std::fs::read(format!("{}expected/basic_v2.core.csv", ROOT)).unwrap();
+        assert!(stdout == want, "{}: core dump differs", profile);
+        let (code, stdout, err) = probe(&["dump", "--full", o]);
+        assert_eq!(code, 0, "{}", err);
+        assert!(stdout == std::fs::read(golden("basic.events.csv")).unwrap());
+
+        let (code, stdout, _) = probe(&["verify", o]);
+        assert_eq!(code, 0, "{}", String::from_utf8_lossy(&stdout));
+        let (a, b) = (
+            probe(&["cat", "--market", "mkt-2", &golden("basic_v2.probe")]),
+            probe(&["cat", "--market", "mkt-2", o]),
+        );
+        assert_eq!((a.0, b.0), (0, 0));
+        assert!(a.1 == b.1 && !a.1.is_empty(), "{}: cat differs", profile);
+        let conv = tmp(&format!("basic_v2.{}.parquet", profile));
+        let (code, _, err) = probe(&["convert", o, "-o", conv.to_str().unwrap()]);
+        assert_eq!(code, 0, "{}", err);
+    }
+    // rc1 needs a v1 / v2 source
+    let v3 = golden("v3/basic_v2.fast.probe");
+    let out = tmp("rc1-from-v3.probe");
+    let (code, _, err) = probe(&["transcode", &v3, out.to_str().unwrap(), "--profile", "rc1"]);
+    assert_ne!(code, 0);
+    assert!(err.contains("rc1"), "{}", err);
+}

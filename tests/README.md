@@ -12,6 +12,8 @@ reader that this repository's reader is held to. Never edit these files to make 
 | `golden/basic_v1.probe.evidx` | the `.evidx` sidecar of `basic_v1.probe` (Appendix A) |
 | `expected/X.core.csv` | the core dump (8.2) of `X.probe` |
 | `expected/X.SLUG.book-max.csv` | the `book-max` rows of market `SLUG` in `X.probe`, with a header |
+| `golden/v3/X.PROFILE.probe` | Probe v3 vectors (section 9.12): `X.probe` transcoded to profile `fast`, `fast1` or `rc1` |
+| `expected/v3/X.PROFILE.core.csv` | the core dump of `golden/v3/X.PROFILE.probe`, byte-identical to `expected/X.core.csv` |
 
 The vectors were written by the production writer's code. Its own decoder, the Go reader and the
 Rust reader of this repository reproduce every `events.csv`, `books.csv` and core dump.

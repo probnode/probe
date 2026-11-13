@@ -83,3 +83,30 @@ def test_unknown_market_and_bad_file(tmp_path):
     bad.write_bytes(b"EVM4\x05\x00\x00\x00{oops")
     with pytest.raises(ValueError):
         pf.open(str(bad))
+
+
+@pytest.mark.parametrize("profile", ["fast", "fast1", "rc1"])
+def test_v3_reads_like_its_source(profile):
+    src = pf.open(golden("basic_v2.probe"))
+    f = pf.open(golden(f"v3/basic_v2.{profile}.probe"))
+    assert f.version == "v3"
+    assert f.header["header_version"] == "evmin/6"
+    assert f.header["profile"] == profile
+    assert f.header["source_version"] == "evmin/5"
+    assert f.core_digest() == (384, 1927, "ace341825691e222")
+    assert f.events().equals(src.events())
+    assert f.levels().equals(src.levels())
+    assert f.book_max(market="mkt-2").equals(src.book_max(market="mkt-2"))
+    assert f.events(market="mkt-2").equals(src.events(market="mkt-2"))
+
+
+def test_transcode_writes_the_v3_vector(tmp_path):
+    out = tmp_path / "basic_v1.fast.probe"
+    n = pf.open(golden("basic_v1.probe")).transcode(str(out))
+    data = out.read_bytes()
+    assert n == len(data)
+    with open(golden("v3/basic_v1.fast.probe"), "rb") as fh:
+        assert data == fh.read()
+    assert pf.open(str(out)).core_digest() == (384, 1927, "ace341825691e222")
+    with pytest.raises(ValueError):
+        pf.open(golden("basic_v1.probe")).transcode(str(out), profile="nope")

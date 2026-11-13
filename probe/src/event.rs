@@ -264,8 +264,8 @@ impl File {
             pos[bi as usize][j as usize] = idx;
         }
         let side = SideStreams::read(self, si, hashes)?;
-        match self.header.version {
-            Version::V1 => {
+        match self.header.side_layout() {
+            Version::V1 | Version::V3 => {
                 let nck = self.segments[si].n_ck.min(evs.len());
                 attach_v1(&mut evs, nck, &side)?;
             }
@@ -310,7 +310,7 @@ impl File {
         let mut evs: Vec<Event> = (0..b.events.len())
             .map(|j| self.build_event(si, None, j, b.row, &b.events[j], b.event_levels(j)))
             .collect();
-        if let (Some(sd), Version::V2) = (side, self.header.version) {
+        if let (Some(sd), Version::V2) = (side, self.header.side_layout()) {
             let entry = &self.segments[si].blocks[bi];
             let c = entry
                 .counts

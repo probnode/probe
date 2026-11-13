@@ -4,6 +4,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use probe_format::arrow::{book_max_batch, book_max_schema, BatchWriter, BATCH_ROWS};
 use probe_format::bookmax::{push_micro, BookMax, BookMaxRow, BOOK_MAX_COLUMNS};
 use probe_format::dump::{push_csv, push_hex, write_dump};
+use probe_format::v3::{self, Profile};
 use probe_format::{core_dump, Event, EventType, File, Query, Result as PResult};
 use serde_json::json;
 use std::io::{BufWriter, Write};
@@ -33,6 +34,26 @@ enum What {
 enum TextFormat {
     Csv,
     Ndjson,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum ProfileArg {
+    /// Model M2 with event columns (codecs 20, 21): the smallest and fastest.
+    Fast,
+    /// Model M1 (codec 16).
+    Fast1,
+    /// v1's blocks as they are (codec 2), with v3's order and index; v1 / v2 sources only.
+    Rc1,
+}
+
+impl From<ProfileArg> for Profile {
+    fn from(p: ProfileArg) -> Profile {
+        match p {
+            ProfileArg::Fast => Profile::Fast,
+            ProfileArg::Fast1 => Profile::Fast1,
+            ProfileArg::Rc1 => Profile::Rc1,
+        }
+    }
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -118,6 +139,16 @@ enum Cmd {
         /// Decode the order stream with the literal move-to-front list of the specification.
         #[arg(long)]
         literal_order: bool,
+    },
+    /// Transcode a v1, v2 or v3 file into a Probe v3 file, losslessly.
+    Transcode {
+        input: PathBuf,
+        output: PathBuf,
+        #[arg(long, value_enum, default_value = "fast")]
+        profile: ProfileArg,
+        /// Decode the result and compare it with the source, segment by segment.
+        #[arg(long)]
+        verify: bool,
     },
     /// A token's book at a time, from one block.
     Book {
@@ -219,6 +250,12 @@ fn run(cli: Cli) -> AnyResult<ExitCode> {
             eprintln!("{} book-max rows -> {}", n, o.display());
         }
         Cmd::Verify { file, no_hash } => return verify(&file, no_hash),
+        Cmd::Transcode {
+            input,
+            output: o,
+            profile,
+            verify,
+        } => transcode(&input, &o, profile.into(), verify)?,
         Cmd::Dump {
             file,
             output: o,
@@ -283,6 +320,36 @@ fn run(cli: Cli) -> AnyResult<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
+fn transcode(input: &Path, out: &Path, profile: Profile, verify: bool) -> AnyResult<()> {
+    let t = std::time::Instant::now();
+    let src = open(input)?;
+    let r = v3::transcode(&src, profile)?;
+    if verify {
+        let back = File::from_bytes(r.bytes.clone())?;
+        v3::verify_transcode(&src, &back)?;
+    }
+    std::fs::write(out, &r.bytes)?;
+    let parts: serde_json::Map<String, serde_json::Value> = r
+        .part_bytes
+        .iter()
+        .map(|(n, b)| (n.clone(), json!(b)))
+        .collect();
+    println!(
+        "{}",
+        json!({"input": input.display().to_string(), "output": out.display().to_string(), "profile": profile.name(),
+               "source_version": src.version().to_string(), "input_bytes": src.size(), "output_bytes": r.bytes.len(),
+               "verified": verify, "seconds": t.elapsed().as_secs_f64(), "parts": parts})
+    );
+    Ok(())
+}
+
+fn codec_label(c: Option<u32>) -> String {
+    match c {
+        None => String::new(),
+        Some(c) => format!(" {}", v3::codec::name(c).unwrap_or("unknown")),
+    }
+}
+
 fn info(path: &Path, as_json: bool, list_markets: bool) -> AnyResult<()> {
     let f = open(path)?;
     let h = f.header();
@@ -293,7 +360,11 @@ fn info(path: &Path, as_json: bool, list_markets: bool) -> AnyResult<()> {
             json!({
                 "t0_ns": s.t0_ns, "t0": time::format(s.t0_ns), "nmkt": s.nmkt, "blocks": s.blocks.len(), "n_ev": s.n_ev, "n_lv": s.n_lv,
                 "n_ck": s.n_ck, "unsynced": s.unsynced.len(), "has_other_block": s.has_other_block(),
-                "parts": s.parts.iter().map(|p| json!([p.name, p.offset, p.length])).collect::<Vec<_>>(),
+                "parts": s.parts.iter().map(|p| match p.codec {
+                    Some(c) => json!([p.name, p.offset, p.length, c]),
+                    None => json!([p.name, p.offset, p.length]),
+                }).collect::<Vec<_>>(),
+                "blocks_codec": s.blocks_codec(),
             })
         })
         .collect();
@@ -311,6 +382,7 @@ fn info(path: &Path, as_json: bool, list_markets: bool) -> AnyResult<()> {
             "file": path.display().to_string(), "bytes": f.size(), "version": format!("{}", f.version()), "header_version": h.version.header_str(),
             "recorder": h.recorder, "unit_ns": h.unit_ns, "seg_s": h.seg_s, "shift": h.shift, "flags": h.flags, "has_hash": h.has_hash,
             "hour_start_ns": h.hour_start_ns, "hour_start": time::format(h.hour_start_ns), "markets": f.markets().len(), "segments": segs,
+            "profile": h.profile, "source_version": h.source_version.map(|v| v.header_str()),
         });
         if list_markets {
             v["market_rows"] = json!(markets);
@@ -326,10 +398,21 @@ fn info(path: &Path, as_json: bool, list_markets: bool) -> AnyResult<()> {
         h.version.header_str(),
         h.recorder
     );
-    println!(
-        "  coding     family rc, layout mkt, shift {}, flags {}, has_hash {}",
-        h.shift, h.flags, h.has_hash
-    );
+    match h.source_version {
+        Some(sv) => println!(
+            "  coding     family probe3, profile {}, from {} ({}), shift {}, flags {}, has_hash {}",
+            h.profile.as_deref().unwrap_or("?"),
+            sv,
+            sv.header_str(),
+            h.shift,
+            h.flags,
+            h.has_hash
+        ),
+        None => println!(
+            "  coding     family rc, layout mkt, shift {}, flags {}, has_hash {}",
+            h.shift, h.flags, h.has_hash
+        ),
+    }
     println!(
         "  hour       {} (unit_ns {}, seg_s {})",
         time::format(h.hour_start_ns),
@@ -350,7 +433,7 @@ fn info(path: &Path, as_json: bool, list_markets: bool) -> AnyResult<()> {
         let parts: Vec<String> = s
             .parts
             .iter()
-            .map(|p| format!("{} {}", p.name, p.length))
+            .map(|p| format!("{} {}{}", p.name, p.length, codec_label(p.codec)))
             .collect();
         println!(
             "    {:>2} {}  nmkt {}  blocks {}  n_ev {}  n_lv {}  n_ck {}  unsynced {}  [{}]",

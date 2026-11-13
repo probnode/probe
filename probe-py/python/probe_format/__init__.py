@@ -3,7 +3,7 @@
     import probe_format as pf
 
     f = pf.open("hour.probe")
-    f.version                      # "v1" or "v2"
+    f.version                      # "v1", "v2" or "v3"
     f.markets()                    # pyarrow.Table of the markets table
     t = f.book_max(market="will-x-happen")   # every level change, checkpoint level and trade
     df = t.to_pandas()             # or pf.to_polars(t)
@@ -34,7 +34,7 @@ def _table(buf: bytes) -> pa.Table:
 
 
 class File:
-    """An open Probe file (v1 or v2). The file is memory-mapped; tables are decoded on request."""
+    """An open Probe file (v1, v2 or v3). The file is memory-mapped; tables are decoded on request."""
 
     def __init__(self, path: str) -> None:
         self._f = _probe.File(str(path))
@@ -42,8 +42,13 @@ class File:
 
     @property
     def version(self) -> str:
-        """``"v1"`` (header ``evmin/4``) or ``"v2"`` (``evmin/5``)."""
+        """``"v1"`` (header ``evmin/4``), ``"v2"`` (``evmin/5``) or ``"v3"`` (``evmin/6``)."""
         return self._f.version
+
+    def transcode(self, path: str, profile: str = "fast") -> int:
+        """Write this file as Probe v3 to ``path``, losslessly; ``profile`` is ``"fast"`` (the
+        default), ``"fast1"`` or ``"rc1"``. Returns the bytes written."""
+        return self._f.transcode(str(path), profile)
 
     @property
     def header(self) -> dict[str, Any]:

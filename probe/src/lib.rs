@@ -3,10 +3,15 @@
 //! full-book checkpoint of each market every five minutes.
 //!
 //! The format is specified in `spec/PROBE.md` of the repository. This crate reads Probe v1
-//! (header version `evmin/4`) and v2 (`evmin/5`) completely: the header, the markets table, the
-//! segments and block indexes, every event and level in the reference order, one market through
-//! the block index, and every side stream (trade transaction hashes, JSON payloads, best-price
-//! exceptions, venue book hashes).
+//! (header version `evmin/4`), v2 (`evmin/5`) and v3 (`evmin/6`) completely: the header, the
+//! markets table, the segments and block indexes, every event and level in the reference order,
+//! one market through the block index, and every side stream (trade transaction hashes, JSON
+//! payloads, best-price exceptions, venue book hashes). [`File::open`] detects the version, and
+//! every API below works the same on all three.
+//!
+//! Probe v3 is a container in which every part names its codec. [`v3::transcode`] turns any
+//! v1, v2 or v3 file into a v3 file of a [`v3::Profile`] (`fast`, `fast1`, `rc1`), losslessly:
+//! the result decodes to the same events, levels and side streams, byte for byte.
 //!
 //! ```no_run
 //! use probe_format::File;
@@ -49,6 +54,8 @@
 //! - `arrow`: [`arrow`] record batches of events, levels, markets and `book-max` rows, and Arrow
 //!   IPC output.
 //! - `parquet`: parquet output of `book-max` rows.
+//!
+//! Transcoding to v3 is part of the default build.
 
 #![warn(missing_docs)]
 
@@ -60,6 +67,7 @@ mod event;
 mod file;
 mod query;
 mod rc;
+pub mod v3;
 mod walker;
 
 #[cfg(feature = "arrow")]
@@ -73,6 +81,16 @@ pub use file::{
     SUPPORTED_FLAGS,
 };
 pub use query::{Book, Events, Query};
+
+/// Appends v as an unsigned LEB128 varint.
+#[inline]
+pub(crate) fn put_uvarint(out: &mut Vec<u8>, mut v: u64) {
+    while v >= 0x80 {
+        out.push((v as u8) | 0x80);
+        v >>= 7;
+    }
+    out.push(v as u8);
+}
 
 /// Reads an unsigned LEB128 varint: (value, bytes read). `None` when cut short or longer than 10
 /// bytes.

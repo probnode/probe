@@ -1,12 +1,12 @@
-//! The container (specification section 3): magic, header JSON, markets table, segments, parts and
-//! the block index.
+//! The container (specification sections 3 and 9.1): magic, header JSON, markets table, segments,
+//! parts and the block index.
 
 use crate::error::{format_err, Error, Result};
 use crate::uvarint;
 use serde::Deserialize;
 use std::path::Path;
 
-/// The magic of every Probe file, v1 and v2.
+/// The magic of every Probe file, v1, v2 and v3.
 pub const MAGIC: &[u8; 4] = b"EVM4";
 
 /// The flag bits this reader decodes (3.11): 16 (`lat` as a delta) and 64 (price from the best).
@@ -21,22 +21,27 @@ pub enum Version {
     /// Probe v2, header version `"evmin/5"`: per-block counts in the block index, side streams in
     /// block order.
     V2,
+    /// Probe v3, header version `"evmin/6"`: every part names its codec (specification 9). The
+    /// side streams keep the layout of the source version ([`Header::source_version`]).
+    V3,
 }
 
 impl Version {
-    /// The header's `version` string: `"evmin/4"` or `"evmin/5"`.
+    /// The header's `version` string: `"evmin/4"`, `"evmin/5"` or `"evmin/6"`.
     pub fn header_str(self) -> &'static str {
         match self {
             Version::V1 => "evmin/4",
             Version::V2 => "evmin/5",
+            Version::V3 => "evmin/6",
         }
     }
 
-    /// The version number: 1 or 2.
+    /// The version number: 1, 2 or 3.
     pub fn number(self) -> u32 {
         match self {
             Version::V1 => 1,
             Version::V2 => 2,
+            Version::V3 => 3,
         }
     }
 
@@ -45,6 +50,7 @@ impl Version {
         match s {
             "evmin/4" => Some(Version::V1),
             "evmin/5" => Some(Version::V2),
+            "evmin/6" => Some(Version::V3),
             _ => None,
         }
     }
@@ -77,6 +83,20 @@ pub struct Header {
     pub hour_start_ns: i64,
     /// `[offset, length]` of the zstd markets table in the body.
     pub markets_zst: (u64, u64),
+    /// v3: the profile the writer used (`fast`, `fast1`, `rc1`). Informative: readers go by the
+    /// codec ids of the parts.
+    pub profile: Option<String>,
+    /// v3: the version of the file it was transcoded from (v1 or v2), which sets the layout of
+    /// the side streams. `None` in a v1 or v2 file.
+    pub source_version: Option<Version>,
+}
+
+impl Header {
+    /// The version whose side-stream layout the file uses: the file's own for v1 and v2, the
+    /// source's for v3.
+    pub fn side_layout(&self) -> Version {
+        self.source_version.unwrap_or(self.version)
+    }
 }
 
 /// One row of the markets table (3.4). A market whose units become finer during the hour gets a
@@ -109,13 +129,16 @@ pub struct Market {
 /// A named byte range of a segment, offset into the body.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Part {
-    /// The part name: `order`, `bidx`, `blocks`, `tx`, `payload.zst`, `hash`, or one a later
-    /// writer added (readers ignore names they do not know).
+    /// The part name: `order`, `bidx`, `blocks`, `tx`, `payload.zst`, `hash`; in v3 also
+    /// `bidx3`, `tables`, `evcols`; or one a later writer added (readers ignore names they do not
+    /// know).
     pub name: String,
     /// Offset into the body.
     pub offset: u64,
     /// Length in bytes.
     pub length: u64,
+    /// v3: the codec id of the part (specification 9.2); `None` in v1 and v2.
+    pub codec: Option<u32>,
 }
 
 /// A v2 block's side-stream counts (3.7) and their prefix sums over the blocks before it, which
@@ -176,7 +199,9 @@ pub struct Segment {
     pub parts: Vec<Part>,
     /// The block index, ascending row.
     pub blocks: Vec<BlockEntry>,
-    bitmap: Vec<u8>,
+    pub(crate) bitmap: Vec<u8>,
+    /// v3: what the codecs need beyond the block index.
+    pub(crate) v3: Option<crate::v3::Seg3>,
 }
 
 impl Segment {
@@ -199,6 +224,11 @@ impl Segment {
             return None;
         }
         self.blocks.binary_search_by_key(&row, |b| b.row).ok()
+    }
+
+    /// v3: the codec id of the segment's `blocks` part; `None` in v1 and v2.
+    pub fn blocks_codec(&self) -> Option<u32> {
+        self.v3.as_ref().map(|v| v.blocks_codec)
     }
 
     /// Whether the segment has a type-4 block.
@@ -246,6 +276,14 @@ struct HeaderJson {
     #[serde(default)]
     hour_start_ns: i64,
     markets_zst: (i64, i64),
+    #[serde(default)]
+    profile: Option<String>,
+    #[serde(default)]
+    src_version: Option<String>,
+    #[serde(default)]
+    mkunits: Option<(i64, i64)>,
+    #[serde(default)]
+    mkslugs: Option<(i64, i64)>,
     segments: Vec<SegmentJson>,
 }
 
@@ -256,7 +294,7 @@ fn default_seg_s() -> i64 {
 #[derive(Deserialize)]
 struct SegmentJson {
     t0_ns: i64,
-    parts: Vec<(String, i64, i64)>,
+    parts: Vec<Vec<serde_json::Value>>,
     nmkt: usize,
     n_ev: usize,
     n_lv: usize,
@@ -317,7 +355,7 @@ fn check_header(h: &HeaderJson) -> Result<Header> {
         Some(v) => v,
         None => {
             return Err(Error::Unsupported(format!(
-                "version {}, want \"evmin/4\" or \"evmin/5\"",
+                "version {}, want \"evmin/4\", \"evmin/5\" or \"evmin/6\"",
                 h.version
             )))
         }
@@ -325,12 +363,30 @@ fn check_header(h: &HeaderJson) -> Result<Header> {
     if !h.magic.is_empty() && h.magic != "EVM4" {
         return format_err(format!("header magic {:?}", h.magic));
     }
-    if h.family != "rc" || h.layout != "mkt" {
+    let family = if version == Version::V3 {
+        crate::v3::FAMILY
+    } else {
+        "rc"
+    };
+    if h.family != family || h.layout != "mkt" {
         return Err(Error::Unsupported(format!(
-            "family {:?} layout {:?}, want rc / mkt",
-            h.family, h.layout
+            "family {:?} layout {:?}, want {} / mkt",
+            h.family, h.layout, family
         )));
     }
+    let source_version = if version == Version::V3 {
+        match h.src_version.as_deref().and_then(Version::from_header_str) {
+            Some(v @ (Version::V1 | Version::V2)) => Some(v),
+            _ => {
+                return Err(Error::Unsupported(format!(
+                    "v3 src_version {:?}, want \"evmin/4\" or \"evmin/5\"",
+                    h.src_version
+                )))
+            }
+        }
+    } else {
+        None
+    };
     if h.unit_ns != 1000 {
         return Err(Error::Unsupported(format!(
             "unit_ns {}, want 1000",
@@ -362,7 +418,35 @@ fn check_header(h: &HeaderJson) -> Result<Header> {
         has_hash: h.has_hash,
         hour_start_ns: h.hour_start_ns,
         markets_zst: (h.markets_zst.0 as u64, h.markets_zst.1 as u64),
+        profile: if version == Version::V3 {
+            h.profile.clone()
+        } else {
+            None
+        },
+        source_version,
     })
+}
+
+/// A part entry of the header: `[name, offset, length]` in v1 / v2, `[name, offset, length,
+/// codec]` in v3.
+type PartEntry = (String, i64, i64, Option<u32>);
+
+fn part_entry(v: &[serde_json::Value], v3: bool) -> Result<PartEntry> {
+    let want = if v3 { 4 } else { 3 };
+    let bad = || Error::Format(format!("part entry {:?}: want {} fields", v, want));
+    if v.len() != want {
+        return Err(bad());
+    }
+    let name = v[0].as_str().ok_or_else(bad)?.to_string();
+    let off = v[1].as_i64().ok_or_else(bad)?;
+    let len = v[2].as_i64().ok_or_else(bad)?;
+    let codec = if v3 {
+        let c = v[3].as_u64().ok_or_else(bad)?;
+        Some(u32::try_from(c).map_err(|_| bad())?)
+    } else {
+        None
+    };
+    Ok((name, off, len, codec))
 }
 
 /// Lenient base64 (standard alphabet, padding optional).
@@ -483,7 +567,8 @@ impl File {
         let b: &[u8] = &data;
         let (hj, body_off) = parse_header_json(b)?;
         let header = check_header(&hj)?;
-        let v2 = header.version == Version::V2;
+        let is_v3 = header.version == Version::V3;
+        let v2 = header.side_layout() == Version::V2;
         let body_len = b.len() - body_off;
         let rng = |off: i64, n: i64| -> Result<(usize, usize)> {
             if off < 0
@@ -515,13 +600,41 @@ impl File {
             }
             let mut parts = Vec::with_capacity(s.parts.len());
             for p in &s.parts {
-                let (o, n) = rng(p.1, p.2)
-                    .map_err(|e| Error::Format(format!("segment {} part {}: {}", si, p.0, e)))?;
+                let (name, off, len, codec) = part_entry(p, is_v3)
+                    .map_err(|e| Error::Format(format!("segment {}: {}", si, e)))?;
+                let (o, n) = rng(off, len)
+                    .map_err(|e| Error::Format(format!("segment {} part {}: {}", si, name, e)))?;
                 parts.push(Part {
-                    name: p.0.clone(),
+                    name,
                     offset: o as u64,
                     length: n as u64,
+                    codec,
                 });
+            }
+            let bitmap =
+                b64decode(&s.ckpt).map_err(|e| Error::Format(format!("segment {}: {}", si, e)))?;
+            if is_v3 {
+                let seg = crate::v3::parse_segment(
+                    &b[body_off..],
+                    si,
+                    crate::v3::SegHead {
+                        t0_ns: s.t0_ns,
+                        nmkt: s.nmkt,
+                        n_ev: s.n_ev,
+                        n_lv: s.n_lv,
+                        n_ck: s.n_ck,
+                        unsynced: s.unsynced.clone().unwrap_or_default(),
+                    },
+                    parts,
+                    bitmap,
+                    v2,
+                )?;
+                if v2 {
+                    check_side_totals(&seg, header.has_hash)
+                        .map_err(|e| Error::Format(format!("segment {}: {}", si, e)))?;
+                }
+                segments.push(seg);
+                continue;
             }
             let get = |name: &str| -> Result<(usize, usize)> {
                 parts
@@ -545,14 +658,25 @@ impl File {
                 unsynced: s.unsynced.clone().unwrap_or_default(),
                 parts,
                 blocks,
-                bitmap: b64decode(&s.ckpt)
-                    .map_err(|e| Error::Format(format!("segment {}: {}", si, e)))?,
+                bitmap,
+                v3: None,
             };
             if v2 {
                 check_side_totals(&seg, header.has_hash)
                     .map_err(|e| Error::Format(format!("segment {}: {}", si, e)))?;
             }
             segments.push(seg);
+        }
+        if is_v3 {
+            let mk = |r: Option<(i64, i64)>| -> Result<Option<(usize, usize)>> {
+                r.map(|(o, n)| rng(o, n)).transpose()
+            };
+            crate::v3::check_market_parts(
+                &b[body_off..],
+                mk(hj.mkunits)?,
+                mk(hj.mkslugs)?,
+                &markets,
+            )?;
         }
         Ok(File {
             data,
@@ -638,6 +762,10 @@ impl File {
     /// the literal move-to-front list of the specification. Both give the same ids.
     pub fn set_order_fast(&mut self, fast: bool) {
         self.order_fast = fast;
+    }
+
+    pub(crate) fn is_v3(&self) -> bool {
+        self.header.version == Version::V3
     }
 
     pub(crate) fn seg(&self, si: usize) -> Result<&Segment> {
