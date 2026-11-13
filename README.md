@@ -14,9 +14,7 @@
   <a href="https://github.com/probnode/probe/blob/main/Cargo.toml"><img src="https://img.shields.io/badge/MSRV-1.85-blue.svg" alt="MSRV 1.85"></a>
   <img src="https://img.shields.io/badge/python-3.9%2B-blue.svg" alt="Python 3.9+">
   <a href="https://github.com/probnode/probe/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
-  <!-- enable on first PyPI release:
   <a href="https://pypi.org/project/probe-format/"><img src="https://img.shields.io/pypi/v/probe-format.svg?label=PyPI" alt="probe-format on PyPI"></a>
-  -->
 </p>
 
 ## Overview
@@ -92,12 +90,10 @@ cargo add probe-format --features parquet      # with Arrow and parquet output
 cargo install probe-cli                        # the probe command
 ```
 
-The Python package goes to PyPI with its first release. Until then, build it from this repository
-(needs a Rust toolchain):
+Python (prebuilt wheels for Linux, macOS and Windows, Python 3.9+):
 
 ```sh
-pip install "maturin>=1.5,<2"
-pip install ./probe-py                         # import probe_format
+pip install probe-format                       # import probe_format
 ```
 
 Library features: `parallel` (default, rayon), `arrow` (record batches, Arrow IPC), `parquet`.
