@@ -113,7 +113,15 @@ fn every_documented_command_and_option_exists() {
 
     // The pages are meant to cover the tool; if a subcommand stops appearing in them, that is a
     // documentation hole and this is where it shows up.
-    for sub in ["info", "cat", "convert", "verify", "dump", "book", "transcode"] {
+    for sub in [
+        "info",
+        "cat",
+        "convert",
+        "verify",
+        "dump",
+        "book",
+        "transcode",
+    ] {
         assert!(
             checked.contains(sub),
             "`probe {sub}` is in the binary and in no page"
@@ -142,8 +150,12 @@ fn the_documented_invocations_run() {
         vec!["--version"],
         vec!["info", vector],
         vec!["info", vector, "--markets"],
-        vec!["cat", vector, "--what", "levels", "--format", "ndjson", "--limit", "20"],
-        vec!["cat", vector, "--what", "events", "--format", "csv", "--limit", "5"],
+        vec![
+            "cat", vector, "--what", "levels", "--format", "ndjson", "--limit", "20",
+        ],
+        vec![
+            "cat", vector, "--what", "events", "--format", "csv", "--limit", "5",
+        ],
         vec!["convert", vector, "-o", parquets],
         vec!["verify", vector],
         vec!["dump", vector, "-o", cores],
