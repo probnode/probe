@@ -26,7 +26,9 @@ market every five minutes. Nothing is sampled or throttled. [ProbNode](https://p
 stores its order books in Probe.
 
 This repository holds the [specification](spec/PROBE.md), the conformance vectors, and the
-reference implementations:
+reference implementations. **Reading a file, step by step, in all three languages:
+[docs/READING.md](docs/READING.md).** Working on the format itself: [AGENTS.md](AGENTS.md).
+
 
 | piece | what it gives you |
 |---|---|
