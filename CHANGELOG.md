@@ -8,6 +8,28 @@ specified in [spec/PROBE.md](spec/PROBE.md) and summarised under [Format version
 
 ## [Unreleased]
 
+### Added
+
+- **Prebuilt `probe` binaries on every release** (`release-binaries.yml`): Linux x86_64 and
+  aarch64 (static musl), macOS aarch64 and x86_64, Windows x86_64, with `SHA256SUMS` attached to
+  the GitHub release. Until now the only way to get the command was a Rust toolchain, which is a
+  toolchain too many for someone who wants to read one file. The binary is run once in the
+  workflow before it is published.
+- **[`docs/READING.md`](docs/READING.md)**: reading a file end to end - install and verify, the
+  header, one market through the block index, a time range, the book at an instant, conversion to
+  parquet or Arrow, the Python and Rust paths, upgrading to v3, and what to do when a file is
+  wrong.
+- **[`AGENTS.md`](AGENTS.md)**: what is in the repository, how to run everything, and the six
+  rules that are not style - the vectors are never edited to make a test pass, a reader proves
+  itself by the core dump, a codec id means the same bytes forever, a new version never changes
+  what an older file means, a corrupt file errors rather than panics, and no claim ships without
+  a measurement.
+- **The documentation is executed** (`probe-cli/tests/docs.rs`): every `probe …` line in
+  `README.md` and `docs/READING.md` is read out of the markdown, its subcommand and every option
+  held to the binary's help, and a file-only form of each run against a conformance vector. A
+  renamed flag or a removed command now fails a test instead of being found by a reader.
+
+
 ## [0.2.0] - 2026-11-13
 
 Probe v3 (`evmin/6`): read it everywhere, and write it from any Probe file.

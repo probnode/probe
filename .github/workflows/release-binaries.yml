@@ -1,0 +1,134 @@
+name: release-binaries
+
+# Builds the `probe` command for every platform we ship and attaches the archives, with
+# SHA256SUMS, to the GitHub release for the tag.
+#
+# Why this exists: until now a release carried the crates and the wheels and no binary at all, so
+# the only way to get the command was `cargo install probe-cli` - a Rust toolchain, to read a
+# file. That is a toolchain too many for someone who just bought an hour of data.
+#
+# Why artifacts rather than a binary committed to the repository: a committed binary cannot be
+# checked against the source it claims to come from, it is carried by every clone forever, and it
+# is the shape a supply-chain problem takes. An archive built by CI from the tag, with its
+# checksum published beside it, can be verified and costs the repository nothing.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "An existing tag to build and attach to (for a re-run)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.repository == 'probnode/probe'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # musl rather than gnu on Linux: a static binary runs on any distribution, and the
+          # alternative is a glibc version requirement nobody reads until it fails.
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            cross: true
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            cross: true
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation support
+        if: matrix.cross
+        run: |
+          cargo install cross --locked --version 0.2.5
+
+      - name: Build
+        shell: bash
+        run: |
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            cross build --release --locked -p probe-cli --target ${{ matrix.target }}
+          else
+            cargo build --release --locked -p probe-cli --target ${{ matrix.target }}
+          fi
+
+      # The binary is run once before it is published. A release artifact that does not start is
+      # worse than no release artifact: it is one somebody has to discover.
+      - name: It runs
+        if: "!matrix.cross"
+        shell: bash
+        run: |
+          bin="target/${{ matrix.target }}/release/probe"
+          [ -f "$bin" ] || bin="$bin.exe"
+          "$bin" --version
+          "$bin" info tests/golden/basic_v2.probe
+
+      - name: Package
+        shell: bash
+        run: |
+          set -eu
+          name="probe-${{ matrix.target }}"
+          mkdir -p "dist/$name"
+          if [ -f "target/${{ matrix.target }}/release/probe.exe" ]; then
+            cp "target/${{ matrix.target }}/release/probe.exe" "dist/$name/"
+          else
+            cp "target/${{ matrix.target }}/release/probe" "dist/$name/"
+          fi
+          cp LICENSE NOTICE README.md "dist/$name/"
+          cd dist
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            7z a -tzip "$name.zip" "$name" > /dev/null
+          else
+            tar czf "$name.tar.gz" "$name"
+          fi
+          rm -rf "$name"
+          ls -l
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: probe-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  attach:
+    needs: build
+    if: github.repository == 'probnode/probe'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: staged
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          cd staged
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          gh release upload "$TAG" staged/* --repo "$GITHUB_REPOSITORY" --clobber
